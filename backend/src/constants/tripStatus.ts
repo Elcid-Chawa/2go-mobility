@@ -1,0 +1,42 @@
+export enum TripStatus {
+  REQUESTED = 'REQUESTED',
+  SEARCHING_DRIVER = 'SEARCHING_DRIVER',
+  DRIVER_ASSIGNED = 'DRIVER_ASSIGNED',
+  DRIVER_ACCEPTED = 'DRIVER_ACCEPTED',
+  DRIVER_ARRIVED = 'DRIVER_ARRIVED',
+  TRIP_STARTED = 'TRIP_STARTED',
+  TRIP_COMPLETED = 'TRIP_COMPLETED',
+  PAYMENT_PENDING = 'PAYMENT_PENDING',
+  PAID = 'PAID',
+  RATED = 'RATED',
+  CANCELLED = 'CANCELLED',
+}
+
+export enum PaymentStatus {
+  PENDING = 'PENDING',
+  PAID = 'PAID',
+  FAILED = 'FAILED',
+}
+
+export enum PaymentMethod {
+  CASH = 'CASH',
+  DIGITAL_WALLET = 'DIGITAL_WALLET',
+  CARD = 'CARD',
+}
+
+export enum DriverOnlineStatus {
+  ONLINE = 'ONLINE',
+  OFFLINE = 'OFFLINE',
+}
+
+export enum DriverAvailabilityStatus {
+  AVAILABLE = 'AVAILABLE',
+  BUSY = 'BUSY',
+  ON_TRIP = 'ON_TRIP',
+}
+
+export enum DriverApprovalStatus {
+  PENDING = 'PENDING',
+  APPROVED = 'APPROVED',
+  REJECTED = 'REJECTED',
+}

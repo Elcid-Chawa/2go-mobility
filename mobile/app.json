@@ -1,0 +1,28 @@
+{
+  "expo": {
+    "name": "2GO Mobility",
+    "slug": "2go",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "resizeMode": "contain",
+      "backgroundColor": "#0f172a"
+    },
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#0f172a"
+      }
+    },
+    "extra": {
+      "eas": {
+        "projectId": "fffd5f37-64da-499d-a5f9-4d7ece49bce8"
+      }
+    },
+    "owner": "chawextech"
+  }
+}
