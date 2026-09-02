@@ -30,6 +30,7 @@ yarn-error.log*
 # OS & Editor Files
 .DS_Store
 Thumbs.db
+.expo/
 .vscode/
 .idea/
 *.swp
