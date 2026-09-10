@@ -1,14 +1,20 @@
-import mongoose from 'mongoose';
-import { Trip, ITrip } from './trip.model';
-import { TripLocation } from './tripLocation.model';
-import { Customer } from '../customers/customer.model';
-import { Driver } from '../drivers/driver.model';
-import { TripStatus, PaymentStatus, DriverAvailabilityStatus } from '../../constants/tripStatus';
-import { VehicleCategory } from '../../constants/vehicleCategory';
-import { PricingService } from '../pricing/pricing.service';
-import { DispatchService } from '../dispatch/dispatch.service';
-import { calculateDistanceKm } from '../../utils/geo';
-import { logger } from '../../config/logger';
+import mongoose from "mongoose";
+import { Trip, ITrip } from "./trip.model";
+import { TripLocation } from "./tripLocation.model";
+import { Customer } from "../customers/customer.model";
+import { Driver } from "../drivers/driver.model";
+import {
+  TripStatus,
+  PaymentStatus,
+  PaymentMethod,
+  DriverAvailabilityStatus,
+} from "../../constants/tripStatus";
+import { VehicleCategory } from "../../constants/vehicleCategory";
+import { UserRole } from "../../constants/roles";
+import { PricingService } from "../pricing/pricing.service";
+import { DispatchService } from "../dispatch/dispatch.service";
+import { calculateDistanceKm, resolveLocationValue } from "../../utils/geo";
+import { logger } from "../../config/logger";
 
 export interface CreateTripDTO {
   pickup: {
@@ -20,6 +26,7 @@ export interface CreateTripDTO {
     coordinates: [number, number]; // [lng, lat]
   };
   category?: VehicleCategory;
+  paymentMethod?: PaymentMethod;
 }
 
 export class TripService {
@@ -27,11 +34,28 @@ export class TripService {
    * Allowed state transitions map
    */
   private static allowedTransitions: Record<TripStatus, TripStatus[]> = {
-    [TripStatus.REQUESTED]: [TripStatus.SEARCHING_DRIVER, TripStatus.DRIVER_ASSIGNED, TripStatus.CANCELLED],
-    [TripStatus.SEARCHING_DRIVER]: [TripStatus.DRIVER_ASSIGNED, TripStatus.CANCELLED],
-    [TripStatus.DRIVER_ASSIGNED]: [TripStatus.DRIVER_ACCEPTED, TripStatus.SEARCHING_DRIVER, TripStatus.CANCELLED],
-    [TripStatus.DRIVER_ACCEPTED]: [TripStatus.DRIVER_ARRIVED, TripStatus.CANCELLED],
-    [TripStatus.DRIVER_ARRIVED]: [TripStatus.TRIP_STARTED, TripStatus.CANCELLED],
+    [TripStatus.REQUESTED]: [
+      TripStatus.SEARCHING_DRIVER,
+      TripStatus.DRIVER_ASSIGNED,
+      TripStatus.CANCELLED,
+    ],
+    [TripStatus.SEARCHING_DRIVER]: [
+      TripStatus.DRIVER_ASSIGNED,
+      TripStatus.CANCELLED,
+    ],
+    [TripStatus.DRIVER_ASSIGNED]: [
+      TripStatus.DRIVER_ACCEPTED,
+      TripStatus.SEARCHING_DRIVER,
+      TripStatus.CANCELLED,
+    ],
+    [TripStatus.DRIVER_ACCEPTED]: [
+      TripStatus.DRIVER_ARRIVED,
+      TripStatus.CANCELLED,
+    ],
+    [TripStatus.DRIVER_ARRIVED]: [
+      TripStatus.TRIP_STARTED,
+      TripStatus.CANCELLED,
+    ],
     [TripStatus.TRIP_STARTED]: [TripStatus.TRIP_COMPLETED],
     [TripStatus.TRIP_COMPLETED]: [TripStatus.PAYMENT_PENDING, TripStatus.PAID],
     [TripStatus.PAYMENT_PENDING]: [TripStatus.PAID],
@@ -40,7 +64,10 @@ export class TripService {
     [TripStatus.CANCELLED]: [],
   };
 
-  static validateTransition(currentStatus: TripStatus, targetStatus: TripStatus): void {
+  static validateTransition(
+    currentStatus: TripStatus,
+    targetStatus: TripStatus,
+  ): void {
     const allowed = this.allowedTransitions[currentStatus] || [];
     if (!allowed.includes(targetStatus)) {
       throw {
@@ -50,39 +77,46 @@ export class TripService {
     }
   }
 
-  static async createTrip(customerId: string, dto: CreateTripDTO, io?: any): Promise<ITrip> {
+  static async createTrip(
+    customerId: string,
+    dto: CreateTripDTO,
+    io?: any,
+  ): Promise<ITrip> {
     const customer = await Customer.findOne({ userId: customerId });
     if (!customer) {
-      throw { statusCode: 404, message: 'Customer profile not found' };
+      throw { statusCode: 404, message: "Customer profile not found" };
     }
 
+    const pickup = await resolveLocationValue(dto.pickup);
+    const destination = await resolveLocationValue(dto.destination);
     const category = dto.category || VehicleCategory.STANDARD;
     const estimate = await PricingService.calculateEstimate(
-      dto.pickup.coordinates,
-      dto.destination.coordinates,
-      category
+      pickup.coordinates,
+      destination.coordinates,
+      category,
     );
 
     const trip = new Trip({
       customerId: customer._id,
       pickup: {
-        address: dto.pickup.address,
+        address: pickup.address,
         location: {
-          type: 'Point',
-          coordinates: dto.pickup.coordinates,
+          type: "Point",
+          coordinates: pickup.coordinates,
         },
       },
       destination: {
-        address: dto.destination.address,
+        address: destination.address,
         location: {
-          type: 'Point',
-          coordinates: dto.destination.coordinates,
+          type: "Point",
+          coordinates: destination.coordinates,
         },
       },
       distanceKm: estimate.distanceKm,
       estimatedDurationMinutes: estimate.estimatedDurationMinutes,
       estimatedFare: estimate.estimatedFare,
       category,
+      paymentMethod: dto.paymentMethod || PaymentMethod.CASH,
       status: TripStatus.REQUESTED,
       paymentStatus: PaymentStatus.PENDING,
       timestamps: {
@@ -102,33 +136,85 @@ export class TripService {
     return trip;
   }
 
-  static async getTripById(tripId: string): Promise<ITrip> {
+  static async assertTripAccess(
+    trip: ITrip,
+    userId?: string,
+    userRole?: UserRole,
+  ): Promise<void> {
+    if (!userId) {
+      throw { statusCode: 401, message: "Authentication required" };
+    }
+
+    if (userRole === UserRole.ADMIN || userRole === UserRole.OPERATIONS) {
+      return;
+    }
+
+    const customerProfile = await Customer.findOne({ userId });
+    const driverProfile = await Driver.findOne({ userId });
+    const tripCustomerId = (trip.customerId as any)?._id
+      ? (trip.customerId as any)._id.toString()
+      : trip.customerId?.toString();
+    const tripDriverId = (trip.driverId as any)?._id
+      ? (trip.driverId as any)._id.toString()
+      : trip.driverId?.toString();
+
+    const isCustomerOwner = Boolean(
+      customerProfile && tripCustomerId === customerProfile._id.toString(),
+    );
+    const isDriverOwner = Boolean(
+      driverProfile &&
+      tripDriverId &&
+      tripDriverId === driverProfile._id.toString(),
+    );
+
+    if (!isCustomerOwner && !isDriverOwner) {
+      throw {
+        statusCode: 403,
+        message: "You are not authorized to access this trip.",
+      };
+    }
+  }
+
+  static async getTripById(
+    tripId: string,
+    userId?: string,
+    userRole?: UserRole,
+  ): Promise<ITrip> {
     const trip = await Trip.findById(tripId)
       .populate({
-        path: 'customerId',
-        populate: { path: 'userId', select: 'name phone email' },
+        path: "customerId",
+        populate: { path: "userId", select: "name phone email" },
       })
       .populate({
-        path: 'driverId',
+        path: "driverId",
         populate: [
-          { path: 'userId', select: 'name phone email' },
-          { path: 'activeVehicleId' },
+          { path: "userId", select: "name phone email" },
+          { path: "activeVehicleId" },
         ],
       });
 
     if (!trip) {
-      throw { statusCode: 404, message: 'Trip not found' };
+      throw { statusCode: 404, message: "Trip not found" };
     }
 
+    await this.assertTripAccess(trip, userId, userRole);
     return trip;
   }
 
-  static async markArrived(tripId: string, driverUserId: string, io?: any): Promise<ITrip> {
+  static async markArrived(
+    tripId: string,
+    driverUserId: string,
+    io?: any,
+  ): Promise<ITrip> {
     const driver = await Driver.findOne({ userId: driverUserId });
     const trip = await Trip.findById(tripId);
 
-    if (!trip || !driver || trip.driverId?.toString() !== driver._id.toString()) {
-      throw { statusCode: 403, message: 'Unauthorized or trip not found' };
+    if (
+      !trip ||
+      !driver ||
+      trip.driverId?.toString() !== driver._id.toString()
+    ) {
+      throw { statusCode: 403, message: "Unauthorized or trip not found" };
     }
 
     this.validateTransition(trip.status, TripStatus.DRIVER_ARRIVED);
@@ -138,19 +224,27 @@ export class TripService {
     await trip.save();
 
     if (io) {
-      io.to(`trip:${trip._id}`).emit('trip:arrived', { tripId: trip._id });
-      io.to('operations').emit('trip:arrived', { tripId: trip._id });
+      io.to(`trip:${trip._id}`).emit("trip:arrived", { tripId: trip._id });
+      io.to("operations").emit("trip:arrived", { tripId: trip._id });
     }
 
     return trip;
   }
 
-  static async startTrip(tripId: string, driverUserId: string, io?: any): Promise<ITrip> {
+  static async startTrip(
+    tripId: string,
+    driverUserId: string,
+    io?: any,
+  ): Promise<ITrip> {
     const driver = await Driver.findOne({ userId: driverUserId });
     const trip = await Trip.findById(tripId);
 
-    if (!trip || !driver || trip.driverId?.toString() !== driver._id.toString()) {
-      throw { statusCode: 403, message: 'Unauthorized or trip not found' };
+    if (
+      !trip ||
+      !driver ||
+      trip.driverId?.toString() !== driver._id.toString()
+    ) {
+      throw { statusCode: 403, message: "Unauthorized or trip not found" };
     }
 
     this.validateTransition(trip.status, TripStatus.TRIP_STARTED);
@@ -160,8 +254,8 @@ export class TripService {
     await trip.save();
 
     if (io) {
-      io.to(`trip:${trip._id}`).emit('trip:started', { tripId: trip._id });
-      io.to('operations').emit('trip:started', { tripId: trip._id });
+      io.to(`trip:${trip._id}`).emit("trip:started", { tripId: trip._id });
+      io.to("operations").emit("trip:started", { tripId: trip._id });
     }
 
     return trip;
@@ -173,7 +267,7 @@ export class TripService {
     coordinates: [number, number],
     heading = 0,
     speed = 0,
-    io?: any
+    io?: any,
   ): Promise<void> {
     const driver = await Driver.findOne({ userId: driverUserId });
     if (!driver) return;
@@ -183,7 +277,7 @@ export class TripService {
       tripId,
       driverId: driver._id,
       location: {
-        type: 'Point',
+        type: "Point",
         coordinates,
       },
       heading,
@@ -192,21 +286,21 @@ export class TripService {
     });
 
     // Update driver's live coordinate
-    driver.currentLocation = { type: 'Point', coordinates };
+    driver.currentLocation = { type: "Point", coordinates };
     driver.currentHeading = heading;
     driver.lastLocationUpdate = new Date();
     await driver.save();
 
     // Real-time broadcast to trip room & operations
     if (io) {
-      io.to(`trip:${tripId}`).emit('trip:location_updated', {
+      io.to(`trip:${tripId}`).emit("trip:location_updated", {
         tripId,
         coordinates,
         heading,
         speed,
         timestamp: new Date().toISOString(),
       });
-      io.to('operations').emit('trip:location_updated', {
+      io.to("operations").emit("trip:location_updated", {
         tripId,
         coordinates,
         heading,
@@ -215,12 +309,20 @@ export class TripService {
     }
   }
 
-  static async completeTrip(tripId: string, driverUserId: string, io?: any): Promise<ITrip> {
+  static async completeTrip(
+    tripId: string,
+    driverUserId: string,
+    io?: any,
+  ): Promise<ITrip> {
     const driver = await Driver.findOne({ userId: driverUserId });
     const trip = await Trip.findById(tripId);
 
-    if (!trip || !driver || trip.driverId?.toString() !== driver._id.toString()) {
-      throw { statusCode: 403, message: 'Unauthorized or trip not found' };
+    if (
+      !trip ||
+      !driver ||
+      trip.driverId?.toString() !== driver._id.toString()
+    ) {
+      throw { statusCode: 403, message: "Unauthorized or trip not found" };
     }
 
     this.validateTransition(trip.status, TripStatus.TRIP_COMPLETED);
@@ -237,11 +339,11 @@ export class TripService {
     await driver.save();
 
     if (io) {
-      io.to(`trip:${trip._id}`).emit('trip:completed', {
+      io.to(`trip:${trip._id}`).emit("trip:completed", {
         tripId: trip._id,
         finalFare: trip.finalFare,
       });
-      io.to('operations').emit('trip:completed', {
+      io.to("operations").emit("trip:completed", {
         tripId: trip._id,
         finalFare: trip.finalFare,
       });
@@ -254,11 +356,29 @@ export class TripService {
     tripId: string,
     userId: string,
     reason: string,
-    io?: any
+    userRole?: UserRole,
+    io?: any,
   ): Promise<ITrip> {
     const trip = await Trip.findById(tripId);
     if (!trip) {
-      throw { statusCode: 404, message: 'Trip not found' };
+      throw { statusCode: 404, message: "Trip not found" };
+    }
+
+    if (userRole !== UserRole.ADMIN && userRole !== UserRole.OPERATIONS) {
+      const customer = await Customer.findOne({ userId });
+      const driver = await Driver.findOne({ userId });
+      const isCustomerOwner =
+        customer?._id && trip.customerId.toString() === customer._id.toString();
+      const isDriverOwner =
+        driver?._id &&
+        trip.driverId &&
+        trip.driverId.toString() === driver._id.toString();
+      if (!isCustomerOwner && !isDriverOwner) {
+        throw {
+          statusCode: 403,
+          message: "You are not authorized to cancel this trip.",
+        };
+      }
     }
 
     this.validateTransition(trip.status, TripStatus.CANCELLED);
@@ -276,8 +396,11 @@ export class TripService {
     }
 
     if (io) {
-      io.to(`trip:${trip._id}`).emit('trip:cancelled', { tripId: trip._id, reason });
-      io.to('operations').emit('trip:cancelled', { tripId: trip._id, reason });
+      io.to(`trip:${trip._id}`).emit("trip:cancelled", {
+        tripId: trip._id,
+        reason,
+      });
+      io.to("operations").emit("trip:cancelled", { tripId: trip._id, reason });
     }
 
     return trip;
