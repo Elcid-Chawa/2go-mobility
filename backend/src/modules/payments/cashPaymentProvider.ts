@@ -1,17 +1,21 @@
-import { PaymentProvider, ProcessPaymentParams, PaymentResult } from './paymentProvider.interface';
-import { PaymentStatus } from '../../constants/tripStatus';
+import {
+  PaymentProvider,
+  ProcessPaymentParams,
+  PaymentResult,
+} from "./paymentProvider.interface";
+import { PaymentStatus } from "../../constants/tripStatus";
 
 export class CashPaymentProvider implements PaymentProvider {
-  name = 'CASH';
+  name = "MANUAL";
 
   async processPayment(params: ProcessPaymentParams): Promise<PaymentResult> {
-    // In cash settlement, the driver collects directly from customer upon trip completion
+    // Manual settlement records the method selected by the customer or operator.
     const providerReference = `CASH-TX-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
     return {
       success: true,
       status: PaymentStatus.PAID,
       providerReference,
-      message: 'Cash payment collected successfully',
+      message: "Cash payment collected successfully",
     };
   }
 
