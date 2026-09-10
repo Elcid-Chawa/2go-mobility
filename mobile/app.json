@@ -7,14 +7,21 @@
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
     "splash": {
+      "image": "./assets/icon.png",
       "resizeMode": "contain",
       "backgroundColor": "#0f172a"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.chawextech.2go",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
+      "package": "com.chawextech.twogo",
       "adaptiveIcon": {
+        "foregroundImage": "./assets/icon.png",
         "backgroundColor": "#0f172a"
       }
     },
@@ -23,6 +30,9 @@
         "projectId": "fffd5f37-64da-499d-a5f9-4d7ece49bce8"
       }
     },
-    "owner": "chawextech"
+    "owner": "chawextech",
+    "plugins": [
+      "expo-secure-store"
+    ]
   }
 }

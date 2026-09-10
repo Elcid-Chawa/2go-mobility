@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { PersonCard, RouteCard, ui } from "../design";
 import {
   StyleSheet,
   Text,
@@ -12,61 +13,108 @@ import {
   connectSocket,
   driverLocation,
   driverStatus,
+  getDriverEarnings,
+  getDriverProfile,
+  getTrip,
+  getRoute,
+  MapCoordinate,
+  Trip,
   tripAction,
 } from "../api";
 
-function DriverMap() {
+function toMapCoordinate([longitude, latitude]: [
+  number,
+  number,
+]): MapCoordinate {
+  return { latitude, longitude };
+}
+
+function DriverMap({
+  location,
+  pickup,
+}: {
+  location: MapCoordinate | null;
+  pickup: MapCoordinate | null;
+}) {
+  const [route, setRoute] = useState<MapCoordinate[]>([]);
+  useEffect(() => {
+    let active = true;
+    setRoute([]);
+    if (location && pickup) {
+      getRoute(location, pickup)
+        .then(result => { if (active) setRoute(result.coordinates); })
+        .catch(() => undefined);
+    }
+    return () => { active = false; };
+  }, [location?.latitude, location?.longitude, pickup?.latitude, pickup?.longitude]);
+  const center = location ||
+    pickup || { latitude: -1.6585, longitude: 29.2205 };
   return (
     <View style={styles.driverMapContainer}>
       <MapView
+        userInterfaceStyle="dark"
         style={styles.driverMap}
-        initialRegion={{
-          latitude: -1.6585,
-          longitude: 29.2205,
+        region={{
+          latitude: center.latitude,
+          longitude: center.longitude,
           latitudeDelta: 0.035,
           longitudeDelta: 0.035,
         }}
       >
         <UrlTile
-          urlTemplate="https://a.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          urlTemplate="https://tile.openstreetmap.org/{z}/{x}/{y}.png"
           maximumZ={19}
           flipY={false}
         />
-        <Marker
-          coordinate={{ latitude: -1.6585, longitude: 29.2205 }}
-          pinColor="#1677ff"
-          title="Your location"
-        />
-        <Marker
-          coordinate={{ latitude: -1.6734, longitude: 29.238 }}
-          pinColor="#25bd76"
-          title="Pickup"
-        />
-        <Polyline
-          coordinates={[
-            { latitude: -1.6585, longitude: 29.2205 },
-            { latitude: -1.665, longitude: 29.23 },
-            { latitude: -1.6734, longitude: 29.238 },
-          ]}
-          strokeColor="#1677ff"
-          strokeWidth={4}
-        />
+        {location && (
+          <Marker
+            coordinate={location}
+            pinColor="#00d4ed"
+            title="Your location"
+          />
+        )}
+        {pickup && (
+          <Marker coordinate={pickup} pinColor="#25bd76" title="Pickup" />
+        )}
+        {route.length > 1 && <Polyline coordinates={route} strokeColor="#00d4ed" strokeWidth={5} />}
       </MapView>
       <View style={styles.driverMapTitle}>
-        <Text style={styles.driverMapKicker}>CURRENT AREA</Text>
-        <Text style={styles.driverMapName}>Kyeshero, Goma</Text>
+        <Text style={styles.driverMapKicker}>© OpenStreetMap contributors</Text>
+        <Text style={styles.driverMapName}>
+          {location ? "Location active" : "Locating..."}
+        </Text>
       </View>
     </View>
   );
 }
 
-export function DriverHomeScreen() {
-  const [isOnline, setIsOnline] = useState(true);
+export function DriverHomeScreen({ userName }: { userName: string }) {
+  const [activeTab, setActiveTab] = useState<"Rides" | "Earnings">("Rides");
+  const [isOnline, setIsOnline] = useState(false);
   const [driverState, setDriverState] = useState<
-    "IDLE" | "OFFER" | "ACCEPTED" | "ARRIVED" | "IN_TRIP"
+    "IDLE" | "OFFER" | "ACCEPTED" | "ARRIVED" | "IN_TRIP" | "COMPLETED"
   >("IDLE");
   const [offerId, setOfferId] = useState<string | null>(null);
+  const [offerTrip, setOfferTrip] = useState<Trip | null>(null);
+  const [currentLocation, setCurrentLocation] = useState<MapCoordinate | null>(
+    null,
+  );
   const [error, setError] = useState("");
+  const [earnings, setEarnings] = useState<{
+    totalEarnings: number;
+    totalTrips: number;
+    rating: number;
+    currency: string;
+  } | null>(null);
+
+  useEffect(() => {
+    Promise.all([getDriverProfile(), getDriverEarnings()])
+      .then(([profile, driverEarnings]) => {
+        setIsOnline(profile.onlineStatus === "ONLINE");
+        setEarnings(driverEarnings);
+      })
+      .catch(() => setError("Unable to load driver profile"));
+  }, []);
 
   useEffect(() => {
     let socket: Awaited<ReturnType<typeof connectSocket>>;
@@ -75,6 +123,9 @@ export function DriverHomeScreen() {
       socket?.on("trip:offer", (offer: { tripId: string }) => {
         setOfferId(offer.tripId);
         setDriverState("OFFER");
+        getTrip(offer.tripId)
+          .then(setOfferTrip)
+          .catch(() => undefined);
         socket?.emit("trip:join", offer.tripId);
       });
     });
@@ -100,6 +151,7 @@ export function DriverHomeScreen() {
         },
         (position) => {
           const { longitude, latitude, heading } = position.coords;
+          setCurrentLocation({ latitude, longitude });
           driverLocation([longitude, latitude], heading || 0).catch(
             () => undefined,
           );
@@ -141,8 +193,12 @@ export function DriverHomeScreen() {
             ? "ARRIVED"
             : action === "start"
               ? "IN_TRIP"
-              : "IDLE",
+              : action === "complete" ? "COMPLETED" : "IDLE",
       );
+      if (action === "complete") {
+        getTrip(offerId).then(setOfferTrip).catch(() => undefined);
+        getDriverEarnings().then(setEarnings).catch(() => undefined);
+      }
       if (action === "reject" || action === "complete") setOfferId(null);
       setError("");
     } catch (requestError) {
@@ -160,10 +216,17 @@ export function DriverHomeScreen() {
         contentContainerStyle={styles.container}
         showsVerticalScrollIndicator={false}
       >
-        <DriverMap />
-        <View style={styles.header}>
-          <Text style={styles.appName}>2GO DRIVER</Text>
-          <Text style={styles.driverName}>Bob Chauffeur</Text>
+        {activeTab === "Rides" && driverState !== "COMPLETED" && <DriverMap
+          location={currentLocation}
+          pickup={
+            offerTrip
+              ? toMapCoordinate(driverState === "IN_TRIP" ? offerTrip.destination.location.coordinates : offerTrip.pickup.location.coordinates)
+              : null
+          }
+        />}
+        <View style={[styles.header, {marginTop: 16}]}>
+          <Text style={styles.appName}>{activeTab === "Earnings" ? "Your earnings" : driverState === "IN_TRIP" ? "On the way" : "Request radar"}</Text>
+          <Text style={styles.driverName}>{userName}</Text>
         </View>
 
         {/* Online/Offline Toggle Card */}
@@ -195,15 +258,23 @@ export function DriverHomeScreen() {
         {/* Earnings Overview */}
         <View style={styles.statsRow}>
           <View style={styles.statBox}>
-            <Text style={styles.statNumber}>RWF 142,500</Text>
-            <Text style={styles.statLabel}>Today's Earnings</Text>
+            <Text style={styles.statNumber}>
+              {earnings
+                ? `${earnings.currency} ${earnings.totalEarnings.toLocaleString()}`
+                : "--"}
+            </Text>
+            <Text style={styles.statLabel}>Total earnings</Text>
           </View>
           <View style={styles.statBox}>
-            <Text style={styles.statNumber}>8</Text>
+            <Text style={styles.statNumber}>
+              {earnings?.totalTrips ?? "--"}
+            </Text>
             <Text style={styles.statLabel}>Trips Done</Text>
           </View>
           <View style={styles.statBox}>
-            <Text style={styles.statNumber}>⭐ 4.95</Text>
+            <Text style={styles.statNumber}>
+              {earnings ? `⭐ ${earnings.rating.toFixed(1)}` : "⭐ --"}
+            </Text>
             <Text style={styles.statLabel}>Rating</Text>
           </View>
         </View>
@@ -212,31 +283,32 @@ export function DriverHomeScreen() {
         {isOnline && driverState === "OFFER" && offerId && (
           <View style={[styles.card, styles.offerCard]}>
             <View style={styles.offerBadge}>
-              <Text style={styles.offerBadgeText}>⚡ NEW RIDE OFFER (15s)</Text>
+              <Text style={styles.offerBadgeText}>⚡ NEW RIDE REQUEST</Text>
             </View>
-            <Text style={styles.offerFare}>RWF 15,420</Text>
+            <View style={ui.handle}/><Text style={ui.label}>ESTIMATED TRIP FARE</Text>
+            <Text style={styles.offerFare}>
+              RWF{" "}
+              {offerTrip
+                ? Math.round(offerTrip.estimatedFare).toLocaleString()
+                : "--"}
+            </Text>
             <Text style={styles.offerMeta}>
-              1.24 km • 4 mins • Standard Category
+              {offerTrip
+                ? `${offerTrip.distanceKm.toFixed(2)} km • ${offerTrip.estimatedDurationMinutes} mins • ${offerTrip.category}`
+                : "Loading trip details..."}
             </Text>
 
-            <View style={styles.routeBox}>
-              <Text style={styles.routeItem}>
-                🟢 Pickup: Empire State Building
-              </Text>
-              <Text style={styles.routeItem}>
-                🏁 Dest: Grand Central Terminal
-              </Text>
-            </View>
-
+            <PersonCard name={offerTrip?.customerId?.userId?.name || "Your rider"} detail="2Go passenger"/>
+            <RouteCard pickup={offerTrip?.pickup.address || "Loading pickup..."} destination={offerTrip?.destination.address || "Loading destination..."}/>
             <View style={styles.actionRow}>
               <TouchableOpacity
-                style={[styles.btn, styles.rejectBtn]}
+                style={[styles.btn, styles.rejectBtn, {flex: 1}]}
                 onPress={() => performAction("reject")}
               >
                 <Text style={styles.rejectBtnText}>Decline</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={[styles.btn, styles.acceptBtn]}
+                style={[styles.btn, styles.acceptBtn, {flex: 2}]}
                 onPress={() => performAction("accept")}
               >
                 <Text style={styles.acceptBtnText}>Accept Ride</Text>
@@ -250,7 +322,7 @@ export function DriverHomeScreen() {
           <View style={styles.card}>
             <Text style={styles.cardTitle}>En Route to Pickup</Text>
             <Text style={styles.passengerText}>
-              Passenger: Alice Rider (Empire State Building)
+              Passenger trip: {offerTrip?.pickup.address || "Pickup location"}
             </Text>
             <TouchableOpacity
               style={[styles.btn, styles.acceptBtn, { marginTop: 14 }]}
@@ -265,16 +337,18 @@ export function DriverHomeScreen() {
         {driverState === "ARRIVED" && (
           <View style={styles.card}>
             <Text style={styles.cardTitle}>Arrived at Pickup</Text>
-            <Text style={styles.passengerText}>Waiting for Alice Rider...</Text>
+            <Text style={styles.passengerText}>
+              Waiting for {offerTrip?.customerId?.userId?.name || "customer"}...
+            </Text>
             <TouchableOpacity
               style={[
                 styles.btn,
-                { backgroundColor: "#0284c7", marginTop: 14 },
+                { backgroundColor: "#00d4ed", marginTop: 14 },
               ]}
               onPress={() => performAction("start")}
             >
               <Text style={styles.acceptBtnText}>
-                Start Trip to Grand Central
+                Start Trip to {offerTrip?.destination.address || "destination"}
               </Text>
             </TouchableOpacity>
           </View>
@@ -283,30 +357,39 @@ export function DriverHomeScreen() {
         {/* In-Trip State */}
         {driverState === "IN_TRIP" && (
           <View style={styles.card}>
-            <Text style={styles.cardTitle}>Trip In Progress</Text>
+            <View style={ui.handle}/><Text style={styles.cardTitle}>{offerTrip?.estimatedDurationMinutes} MIN · {offerTrip?.distanceKm.toFixed(1)} KM</Text><PersonCard name={offerTrip?.customerId?.userId?.name || "Your rider"} detail="Trip in progress"/><RouteCard pickup={offerTrip?.pickup.address || "Pickup"} destination={offerTrip?.destination.address || "Destination"}/>
             <Text style={styles.passengerText}>
-              Destination: Grand Central Terminal
+              Destination: {offerTrip?.destination.address || "destination"}
             </Text>
             <TouchableOpacity
               style={[
                 styles.btn,
-                { backgroundColor: "#10b981", marginTop: 14 },
+                { backgroundColor: "#39e6b0", marginTop: 14 },
               ]}
               onPress={() => performAction("complete")}
             >
               <Text style={styles.acceptBtnText}>
-                Complete Trip & Collect Cash (RWF 15,420)
+                Complete Trip & Collect Cash (RWF{" "}
+                {offerTrip
+                  ? Math.round(offerTrip.estimatedFare).toLocaleString()
+                  : "--"}
+                )
               </Text>
             </TouchableOpacity>
           </View>
         )}
+        {driverState === "COMPLETED" && <View style={styles.card}>
+          <View style={ui.success}><Text style={ui.check}>✓</Text><Text style={ui.successTitle}>Trip completed!</Text><Text style={ui.muted}>Your trip summary</Text></View>
+          <RouteCard pickup={offerTrip?.pickup.address || "Pickup"} destination={offerTrip?.destination.address || "Destination"}/>
+          <View style={ui.receipt}><Text style={ui.label}>TRIP FARE</Text><Text style={ui.total}>RWF {Math.round(offerTrip?.finalFare ?? offerTrip?.estimatedFare ?? 0).toLocaleString()}</Text><View style={ui.receiptRow}><Text style={ui.muted}>Distance</Text><Text style={ui.body}>{offerTrip?.distanceKm.toFixed(1)} km</Text></View><Text style={ui.muted}>Payment status: {offerTrip?.status === "PAID" || offerTrip?.status === "RATED" ? "Paid" : "Awaiting payment confirmation"}</Text></View>
+          <TouchableOpacity style={[styles.btn, styles.acceptBtn]} onPress={() => {setDriverState("IDLE"); setOfferTrip(null); setActiveTab("Rides");}}><Text style={styles.acceptBtnText}>Find next trip</Text></TouchableOpacity>
+        </View>}
+        {activeTab === "Earnings" && <View style={styles.card}><Text style={ui.label}>EARNINGS OVERVIEW</Text><Text style={ui.total}>{earnings ? `${earnings.currency} ${earnings.totalEarnings.toLocaleString()}` : "Loading…"}</Text><Text style={ui.footnote}>Earnings from your completed trips.</Text></View>}
         {!!error && <Text style={styles.error}>{error}</Text>}
       </ScrollView>
       <View style={styles.bottomNav}>
-        <DriverNavItem icon="⌂" label="Home" active />
-        <DriverNavItem icon="◷" label="Trips" />
-        <DriverNavItem icon="$" label="Earnings" />
-        <DriverNavItem icon="○" label="Profile" />
+        <DriverNavItem icon="◎" label="Rides" active={activeTab === "Rides"} onPress={() => setActiveTab("Rides")} />
+        <DriverNavItem icon="▣" label="Earnings" active={activeTab === "Earnings"} onPress={() => setActiveTab("Earnings")} />
       </View>
     </View>
   );
@@ -316,13 +399,15 @@ function DriverNavItem({
   icon,
   label,
   active = false,
+  onPress,
 }: {
   icon: string;
   label: string;
   active?: boolean;
+  onPress: () => void;
 }) {
   return (
-    <TouchableOpacity style={styles.navItem}>
+    <TouchableOpacity accessibilityRole="tab" accessibilityState={{selected: active}} onPress={onPress} style={styles.navItem}>
       <Text style={[styles.navIcon, active && styles.navActive]}>{icon}</Text>
       <Text style={[styles.navLabel, active && styles.navActive]}>{label}</Text>
     </TouchableOpacity>
@@ -330,20 +415,20 @@ function DriverNavItem({
 }
 
 const styles = StyleSheet.create({
-  driverScreen: { flex: 1, backgroundColor: "#071120" },
+  driverScreen: { flex: 1, backgroundColor: "#0e1519" },
   driverMapContainer: {
-    height: 215,
+    height: 390,
     position: "relative",
-    marginHorizontal: -20,
-    marginTop: -20,
+    marginHorizontal: 0,
+    marginTop: 0,
   },
   driverMap: {
-    height: 215,
-    backgroundColor: "#b3c8d1",
+    height: 390,
+    backgroundColor: "#1d282d",
     overflow: "hidden",
     position: "relative",
-    marginHorizontal: -20,
-    marginTop: -20,
+    marginHorizontal: 0,
+    marginTop: 0,
   },
   mapRoad: {
     position: "absolute",
@@ -362,7 +447,7 @@ const styles = StyleSheet.create({
   },
   mapRoute: {
     position: "absolute",
-    backgroundColor: "#1677ff",
+    backgroundColor: "#00d4ed",
     height: 5,
     borderRadius: 4,
     width: 145,
@@ -380,7 +465,7 @@ const styles = StyleSheet.create({
     width: 27,
     height: 27,
     borderRadius: 15,
-    backgroundColor: "#1677ff",
+    backgroundColor: "#00d4ed",
     borderWidth: 5,
     borderColor: "#eff8ff",
     alignItems: "center",
@@ -393,19 +478,19 @@ const styles = StyleSheet.create({
     position: "absolute",
     top: 17,
     right: 18,
-    backgroundColor: "#071120",
+    backgroundColor: "#171e22",
     borderRadius: 9,
     paddingHorizontal: 11,
     paddingVertical: 8,
   },
   driverMapKicker: {
-    color: "#7790aa",
+    color: "#92a1a9",
     fontSize: 9,
     fontWeight: "800",
     letterSpacing: 1,
   },
   driverMapName: {
-    color: "#f7fbff",
+    color: "#eaf2f4",
     fontSize: 12,
     fontWeight: "800",
     marginTop: 2,
@@ -416,9 +501,9 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     height: 72,
-    backgroundColor: "#0b1729",
+    backgroundColor: "#171e22",
     borderTopWidth: 1,
-    borderTopColor: "#21304a",
+    borderTopColor: "#242c31",
     flexDirection: "row",
     justifyContent: "space-around",
     alignItems: "center",
@@ -426,10 +511,10 @@ const styles = StyleSheet.create({
   navItem: { alignItems: "center", gap: 3, minWidth: 60 },
   navIcon: { color: "#8796ab", fontSize: 21 },
   navLabel: { color: "#8796ab", fontSize: 10, fontWeight: "700" },
-  navActive: { color: "#30c979" },
+  navActive: { color: "#00d4ed" },
   container: {
     padding: 20,
-    backgroundColor: "#090d16",
+    backgroundColor: "#0e1519",
     flexGrow: 1,
     paddingBottom: 90,
   },
@@ -439,27 +524,27 @@ const styles = StyleSheet.create({
   appName: {
     fontSize: 20,
     fontWeight: "bold",
-    color: "#30c979",
+    color: "#39e6b0",
   },
   driverName: {
     fontSize: 16,
-    color: "#94a3b8",
+    color: "#92a1a9",
     marginTop: 2,
   },
   statusCard: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    backgroundColor: "#131b2e",
+    backgroundColor: "#171e22",
     padding: 16,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: "#1e293b",
+    borderColor: "#263238",
     marginBottom: 16,
   },
   statusLabel: {
     fontSize: 11,
-    color: "#64748b",
+    color: "#92a1a9",
     textTransform: "uppercase",
     fontWeight: "600",
   },
@@ -468,15 +553,15 @@ const styles = StyleSheet.create({
     fontWeight: "bold",
     marginTop: 2,
   },
-  onlineText: { color: "#22c55e" },
-  offlineText: { color: "#ef4444" },
+  onlineText: { color: "#39e6b0" },
+  offlineText: { color: "#ff8b91" },
   toggleBtn: {
     paddingHorizontal: 14,
     paddingVertical: 8,
     borderRadius: 8,
   },
-  goOfflineBtn: { backgroundColor: "#ef4444" },
-  goOnlineBtn: { backgroundColor: "#22c55e" },
+  goOfflineBtn: { backgroundColor: "#5a3036" },
+  goOnlineBtn: { backgroundColor: "#123b35" },
   toggleBtnText: { color: "#ffffff", fontWeight: "bold", fontSize: 12 },
   statsRow: {
     flexDirection: "row",
@@ -485,11 +570,11 @@ const styles = StyleSheet.create({
   },
   statBox: {
     flex: 1,
-    backgroundColor: "#131b2e",
+    backgroundColor: "#171e22",
     padding: 12,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: "#1e293b",
+    borderColor: "#263238",
     alignItems: "center",
   },
   statNumber: {
@@ -503,19 +588,19 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   card: {
-    backgroundColor: "#131b2e",
+    backgroundColor: "#171e22",
     borderRadius: 16,
     padding: 20,
     borderWidth: 1,
-    borderColor: "#1e293b",
+    borderColor: "#263238",
     marginBottom: 16,
   },
   offerCard: {
-    borderColor: "#1677ff",
-    backgroundColor: "rgba(22, 119, 255, 0.08)",
+    borderColor: "#00d4ed",
+    backgroundColor: "#171e22",
   },
   offerBadge: {
-    backgroundColor: "#1677ff",
+    backgroundColor: "#00d4ed",
     alignSelf: "flex-start",
     paddingHorizontal: 8,
     paddingVertical: 3,
@@ -528,7 +613,7 @@ const styles = StyleSheet.create({
     fontWeight: "bold",
   },
   offerFare: {
-    fontSize: 26,
+    fontSize: 36,
     fontWeight: "900",
     color: "#ffffff",
   },
@@ -538,7 +623,7 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   routeBox: {
-    backgroundColor: "#090d16",
+    backgroundColor: "#0e1519",
     padding: 10,
     borderRadius: 8,
     gap: 4,
@@ -553,15 +638,16 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   btn: {
-    flex: 1,
+    minHeight: 56,
+    justifyContent: "center",
     padding: 14,
     borderRadius: 10,
     alignItems: "center",
   },
   rejectBtn: { backgroundColor: "#334155" },
-  acceptBtn: { backgroundColor: "#22c55e" },
+  acceptBtn: { backgroundColor: "#00d4ed" },
   rejectBtnText: { color: "#ffffff", fontWeight: "bold" },
-  acceptBtnText: { color: "#090d16", fontWeight: "bold" },
+  acceptBtnText: { color: "#0e1519", fontWeight: "bold" },
   cardTitle: { fontSize: 16, fontWeight: "bold", color: "#ffffff" },
   passengerText: { fontSize: 13, color: "#94a3b8", marginTop: 4 },
   error: { color: "#ff7b86", fontSize: 12, marginTop: 10, lineHeight: 17 },

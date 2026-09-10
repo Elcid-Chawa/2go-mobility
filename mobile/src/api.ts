@@ -5,6 +5,7 @@ declare const process: { env: Record<string, string | undefined> };
 
 export type UserRole = "CUSTOMER" | "DRIVER" | "OPERATIONS" | "ADMIN";
 export type VehicleCategory = "STANDARD" | "COMFORT" | "PREMIUM" | "XL";
+export type PaymentMethod = "CASH" | "CARD" | "MOBILE_MONEY";
 export type TripStatus =
   | "REQUESTED"
   | "SEARCHING_DRIVER"
@@ -39,6 +40,33 @@ export interface FareEstimate {
   estimatedFare: number;
   currency: string;
 }
+
+export interface MapCoordinate {
+  latitude: number;
+  longitude: number;
+}
+
+export interface RouteResult {
+  coordinates: MapCoordinate[];
+  distanceKm: number;
+  durationMinutes: number;
+}
+
+export interface LocationSuggestion {
+  id: string;
+  label: string;
+  coordinate: MapCoordinate;
+}
+
+export interface NearbyDriver {
+  driverId: string;
+  name?: string;
+  rating: number;
+  heading: number;
+  category?: VehicleCategory;
+  location: { coordinates: [number, number] };
+  lastLocationUpdate?: string;
+}
 export interface Trip {
   _id: string;
   status: TripStatus;
@@ -49,7 +77,13 @@ export interface Trip {
   estimatedDurationMinutes: number;
   pickup: { address: string; location: { coordinates: [number, number] } };
   destination: { address: string; location: { coordinates: [number, number] } };
-  driverId?: { _id: string; userId?: { name: string }; rating?: number };
+  customerId?: { userId?: { name: string } };
+  driverId?: {
+    _id: string;
+    userId?: { name: string };
+    rating?: number;
+    activeVehicleId?: { make?: string; model?: string; plateNumber?: string };
+  };
 }
 
 const API_URL =
@@ -148,15 +182,175 @@ export async function estimateFare(input: {
   });
 }
 
+export async function geocodeAddress(address: string): Promise<MapCoordinate> {
+  const query = encodeURIComponent(address.trim());
+  const response = await fetch(
+    `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&q=${query}`,
+    {
+      headers: {
+        "Accept-Language": "en",
+        "User-Agent": "2GO-Mobile/1.0",
+      },
+    },
+  );
+  if (!response.ok) throw new Error("Unable to resolve that address");
+
+  const results = (await response.json()) as Array<{
+    lat?: string;
+    lon?: string;
+  }>;
+  const result = results[0];
+  if (!result?.lat || !result.lon) {
+    throw new Error("No map location found for that address");
+  }
+
+  return { latitude: Number(result.lat), longitude: Number(result.lon) };
+}
+
+export async function searchLocationSuggestions(
+  address: string,
+): Promise<LocationSuggestion[]> {
+  const query = encodeURIComponent(address.trim());
+  if (!address.trim()) return [];
+  const response = await fetch(
+    `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=5&addressdetails=1&q=${query}`,
+    {
+      headers: {
+        "Accept-Language": "en",
+        "User-Agent": "2GO-Mobile/1.0",
+      },
+    },
+  );
+  if (!response.ok) throw new Error("Unable to search locations");
+  const results = (await response.json()) as Array<{
+    place_id?: number;
+    display_name?: string;
+    lat?: string;
+    lon?: string;
+  }>;
+  return results.flatMap((result) => {
+    if (!result.place_id || !result.display_name || !result.lat || !result.lon)
+      return [];
+    return [
+      {
+        id: String(result.place_id),
+        label: result.display_name,
+        coordinate: {
+          latitude: Number(result.lat),
+          longitude: Number(result.lon),
+        },
+      },
+    ];
+  });
+}
+
+export async function reverseGeocode(
+  coordinate: MapCoordinate,
+): Promise<string> {
+  const response = await fetch(
+    `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${coordinate.latitude}&lon=${coordinate.longitude}`,
+    {
+      headers: {
+        "Accept-Language": "en",
+        "User-Agent": "2GO-Mobile/1.0",
+      },
+    },
+  );
+  if (!response.ok) throw new Error("Unable to identify this map location");
+  const result = (await response.json()) as { display_name?: string };
+  return (
+    result.display_name ||
+    `${coordinate.latitude.toFixed(5)}, ${coordinate.longitude.toFixed(5)}`
+  );
+}
+
+export async function getRoute(
+  pickup: MapCoordinate,
+  destination: MapCoordinate,
+): Promise<RouteResult> {
+  const coordinates = `${pickup.longitude},${pickup.latitude};${destination.longitude},${destination.latitude}`;
+  const response = await fetch(
+    `https://router.project-osrm.org/route/v1/driving/${coordinates}?overview=full&geometries=geojson`,
+  );
+  if (!response.ok) throw new Error("Unable to calculate a driving route");
+
+  const body = (await response.json()) as {
+    routes?: Array<{
+      distance: number;
+      duration: number;
+      geometry: { coordinates: Array<[number, number]> };
+    }>;
+  };
+  const route = body.routes?.[0];
+  if (!route) throw new Error("No driving route found");
+
+  return {
+    coordinates: route.geometry.coordinates.map(([longitude, latitude]) => ({
+      latitude,
+      longitude,
+    })),
+    distanceKm: route.distance / 1000,
+    durationMinutes: Math.max(1, Math.round(route.duration / 60)),
+  };
+}
+
+export async function getNearbyDrivers(
+  location: MapCoordinate,
+  radiusKm = 10,
+  category?: VehicleCategory,
+): Promise<NearbyDriver[]> {
+  const params = new URLSearchParams({
+    longitude: String(location.longitude),
+    latitude: String(location.latitude),
+    radiusKm: String(radiusKm),
+  });
+  if (category) params.set("category", category);
+  const token = await getAccessToken();
+  return request<NearbyDriver[]>(
+    `/drivers/nearby?${params.toString()}`,
+    {},
+    token || undefined,
+  );
+}
+
 export async function createTrip(input: {
   pickup: { address: string; coordinates: [number, number] };
   destination: { address: string; coordinates: [number, number] };
   category: VehicleCategory;
+  paymentMethod: PaymentMethod;
 }) {
   const token = await getAccessToken();
   return request<Trip>(
     "/trips",
     { method: "POST", body: JSON.stringify(input) },
+    token || undefined,
+  );
+}
+
+export async function recordTripPayment(tripId: string, method: PaymentMethod) {
+  const token = await getAccessToken();
+  return request(
+    `/trips/${tripId}/payment`,
+    {
+      method: "POST",
+      body: JSON.stringify({ method }),
+    },
+    token || undefined,
+  );
+}
+
+export async function rateTrip(
+  tripId: string,
+  score: number,
+  comment?: string,
+) {
+  const token = await getAccessToken();
+  return request(
+    `/trips/${tripId}/rating`,
+    {
+      method: "POST",
+      body: JSON.stringify({ score, comment }),
+    },
     token || undefined,
   );
 }
@@ -176,6 +370,21 @@ export async function driverStatus(input: {
     { method: "PATCH", body: JSON.stringify(input) },
     token || undefined,
   );
+}
+
+export async function getDriverProfile() {
+  const token = await getAccessToken();
+  return request<any>("/drivers/me", {}, token || undefined);
+}
+
+export async function getDriverEarnings() {
+  const token = await getAccessToken();
+  return request<{
+    totalEarnings: number;
+    totalTrips: number;
+    rating: number;
+    currency: string;
+  }>("/drivers/me/earnings", {}, token || undefined);
 }
 
 export async function driverLocation(

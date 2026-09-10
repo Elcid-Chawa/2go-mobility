@@ -1,4 +1,5 @@
-import React, { useEffect, useState } from "react";
+import { CarIcon, PersonCard, RouteCard, ui } from "../design";
+import React, { useEffect, useRef, useState } from "react";
 import {
   StyleSheet,
   Text,
@@ -8,99 +9,342 @@ import {
   TextInput,
 } from "react-native";
 import MapView, { Marker, Polyline, UrlTile } from "react-native-maps";
+import * as Location from "expo-location";
 import {
   connectSocket,
   createTrip,
   estimateFare,
   FareEstimate,
+  geocodeAddress,
+  getRoute,
+  getNearbyDrivers,
+  MapCoordinate,
+  NearbyDriver,
   getTrip,
   Trip,
   VehicleCategory,
+  LocationSuggestion,
+  PaymentMethod,
+  rateTrip,
+  reverseGeocode,
+  searchLocationSuggestions,
 } from "../api";
 
 const colors = {
-  ink: "#f7fbff",
-  muted: "#8796ab",
-  navy: "#071120",
-  panel: "#101d31",
-  line: "#21304a",
-  blue: "#1677ff",
+  ink: "#eaf2f4",
+  muted: "#92a1a9",
+  navy: "#0e1519",
+  panel: "#171e22",
+  line: "#263238",
+  blue: "#00d4ed",
 };
 
-function MapSurface() {
+const DEFAULT_PICKUP: MapCoordinate = { latitude: -1.6585, longitude: 29.2205 };
+const DEFAULT_DESTINATION: MapCoordinate = {
+  latitude: -1.6734,
+  longitude: 29.238,
+};
+
+function MapSurface({
+  pickup,
+  destination,
+  route,
+  nearbyDrivers,
+  assignedDriverLocation,
+  onMapPress,
+}: {
+  pickup: MapCoordinate | null;
+  destination: MapCoordinate | null;
+  route: MapCoordinate[];
+  nearbyDrivers: NearbyDriver[];
+  assignedDriverLocation: MapCoordinate | null;
+  onMapPress?: (coordinate: MapCoordinate) => void;
+}) {
+  const mapRef = useRef<MapView>(null);
+  const mapCenter = pickup || destination || DEFAULT_PICKUP;
   return (
     <View style={styles.mapContainer}>
       <MapView
+        ref={mapRef}
+        userInterfaceStyle="dark"
         style={styles.map}
-        initialRegion={{
-          latitude: -1.6585,
-          longitude: 29.2205,
+        region={{
+          latitude: mapCenter.latitude,
+          longitude: mapCenter.longitude,
           latitudeDelta: 0.035,
           longitudeDelta: 0.035,
         }}
+        onPress={
+          onMapPress
+            ? (event) => onMapPress(event.nativeEvent.coordinate)
+            : undefined
+        }
       >
         <UrlTile
-          urlTemplate="https://a.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          urlTemplate="https://tile.openstreetmap.org/{z}/{x}/{y}.png"
           maximumZ={19}
           flipY={false}
         />
-        <Marker
-          coordinate={{ latitude: -1.6585, longitude: 29.2205 }}
-          pinColor={colors.blue}
-          title="Pickup"
-        />
-        <Marker
-          coordinate={{ latitude: -1.6734, longitude: 29.238 }}
-          pinColor="#25bd76"
-          title="Destination"
-        />
-        <Polyline
-          coordinates={[
-            { latitude: -1.6585, longitude: 29.2205 },
-            { latitude: -1.665, longitude: 29.23 },
-            { latitude: -1.6734, longitude: 29.238 },
-          ]}
-          strokeColor={colors.blue}
-          strokeWidth={4}
-        />
+        {pickup && (
+          <Marker coordinate={pickup} pinColor={colors.blue} title="Pickup" />
+        )}
+        {destination && (
+          <Marker
+            coordinate={destination}
+            pinColor="#25bd76"
+            title="Destination"
+          />
+        )}
+        {nearbyDrivers.map((driver) => {
+          const [longitude, latitude] = driver.location.coordinates;
+          return (
+            <Marker
+              key={driver.driverId}
+              coordinate={{ latitude, longitude }}
+              pinColor="#f5a524"
+              title={driver.name || "2GO driver"}
+              description={driver.category || "Available nearby"}
+            />
+          );
+        })}
+        {assignedDriverLocation && (
+          <Marker
+            coordinate={assignedDriverLocation}
+            pinColor="#9b59ff"
+            title="Your assigned driver"
+          />
+        )}
+        {route.length > 1 && (
+          <Polyline
+            coordinates={route}
+            strokeColor={colors.blue}
+            strokeWidth={4}
+          />
+        )}
       </MapView>
       <View style={styles.mapLabel}>
-        <Text style={styles.mapLabelText}>OpenStreetMap</Text>
+        <Text style={styles.mapLabelText}>© OpenStreetMap contributors</Text>
       </View>
-      <TouchableOpacity style={styles.locationButton}>
-        <Text style={styles.locationIcon}>+</Text>
+      <TouchableOpacity style={styles.locationButton} accessibilityLabel="Center map on pickup" onPress={() => mapRef.current?.animateToRegion({ ...mapCenter, latitudeDelta: 0.035, longitudeDelta: 0.035 })}>
+        <Text style={styles.locationIcon}>⌖</Text>
       </TouchableOpacity>
     </View>
   );
 }
 
-export function CustomerHomeScreen() {
+export function CustomerHomeScreen({ userName }: { userName: string }) {
   const [pickup, setPickup] = useState("Kyeshero, Goma");
   const [destination, setDestination] = useState("Katindo, Goma");
   const [category, setCategory] = useState<VehicleCategory>("STANDARD");
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("CASH");
   const [tripState, setTripState] = useState<
     "IDLE" | "ASSIGNED" | "ON_TRIP" | "COMPLETED"
   >("IDLE");
   const [rating, setRating] = useState<number>(5);
-  const [estimate, setEstimate] = useState<FareEstimate | null>(null);
+  const [estimates, setEstimates] = useState<Partial<Record<VehicleCategory, FareEstimate>>>({});
+  const estimate = estimates[category] ?? null;
   const [trip, setTrip] = useState<Trip | null>(null);
   const [error, setError] = useState("");
+  const [currentLocation, setCurrentLocation] = useState<MapCoordinate | null>(
+    null,
+  );
+  const [pickupLocation, setPickupLocation] = useState<MapCoordinate | null>(
+    null,
+  );
+  const [destinationLocation, setDestinationLocation] =
+    useState<MapCoordinate | null>(null);
+  const [route, setRoute] = useState<MapCoordinate[]>([]);
+  const [etaMinutes, setEtaMinutes] = useState<number | null>(null);
+  const [usingCurrentPickup, setUsingCurrentPickup] = useState(true);
+  const [nearbyDrivers, setNearbyDrivers] = useState<NearbyDriver[]>([]);
+  const [assignedDriverLocation, setAssignedDriverLocation] =
+    useState<MapCoordinate | null>(null);
+  const [locationMode, setLocationMode] = useState<"pickup" | "destination">(
+    "destination",
+  );
+  const [activeLocationField, setActiveLocationField] = useState<
+    "pickup" | "destination" | null
+  >(null);
+  const [suggestions, setSuggestions] = useState<LocationSuggestion[]>([]);
+  const [isFinishing, setIsFinishing] = useState(false);
+
+  function applyTrip(tripValue: Trip) {
+    setTrip(tripValue);
+    if (tripValue.status === "TRIP_STARTED") setTripState("ON_TRIP");
+    else if (
+      tripValue.status === "TRIP_COMPLETED" ||
+      tripValue.status === "PAID" ||
+      tripValue.status === "RATED"
+    )
+      setTripState("COMPLETED");
+    else if (tripValue.status !== "CANCELLED") setTripState("ASSIGNED");
+  }
+
+  useEffect(() => {
+    if (!pickupLocation) return;
+    let active = true;
+    const refresh = () =>
+      getNearbyDrivers(pickupLocation, 10, category)
+        .then((drivers) => {
+          if (active) setNearbyDrivers(drivers);
+        })
+        .catch(() => {
+          if (active) setNearbyDrivers([]);
+        });
+    refresh();
+    const timer = setInterval(refresh, 15000);
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
+  }, [pickupLocation, category]);
+
+  useEffect(() => {
+    let socket: Awaited<ReturnType<typeof connectSocket>>;
+    connectSocket().then((connectedSocket) => {
+      socket = connectedSocket;
+      socket?.on(
+        "driver:location_updated",
+        (update: {
+          driverId: string;
+          coordinates: [number, number];
+          heading: number;
+        }) => {
+          setNearbyDrivers((drivers) =>
+            drivers.map((driver) =>
+              String(driver.driverId) === String(update.driverId)
+                ? {
+                    ...driver,
+                    heading: update.heading,
+                    location: { coordinates: update.coordinates },
+                  }
+                : driver,
+            ),
+          );
+        },
+      );
+    });
+    return () => {
+      socket?.disconnect();
+    };
+  }, []);
+
+  useEffect(() => {
+    let watcher: Location.LocationSubscription | undefined;
+    async function watchCustomer() {
+      try {
+        const permission = await Location.requestForegroundPermissionsAsync();
+        if (permission.status !== "granted")
+          throw new Error("Location permission is required");
+        watcher = await Location.watchPositionAsync(
+          {
+            accuracy: Location.Accuracy.Balanced,
+            timeInterval: 10000,
+            distanceInterval: 25,
+          },
+          (position) => {
+            const location = {
+              latitude: position.coords.latitude,
+              longitude: position.coords.longitude,
+            };
+            setCurrentLocation(location);
+            if (usingCurrentPickup) {
+              setPickupLocation(location);
+              setPickup(
+                `${location.latitude.toFixed(5)}, ${location.longitude.toFixed(5)}`,
+              );
+            }
+          },
+        );
+      } catch (locationError) {
+        setError(
+          locationError instanceof Error
+            ? locationError.message
+            : "Unable to read current location",
+        );
+      }
+    }
+    watchCustomer();
+    return () => watcher?.remove();
+  }, [usingCurrentPickup]);
+
+  useEffect(() => {
+    if (!pickupLocation || !destinationLocation) return;
+    getRoute(pickupLocation, destinationLocation)
+      .then((result) => {
+        setRoute(result.coordinates);
+        setEtaMinutes(result.durationMinutes);
+      })
+      .catch(() => {
+        setRoute([]);
+        setEtaMinutes(null);
+      });
+  }, [pickupLocation, destinationLocation]);
+
+  useEffect(() => {
+    if (!destination.trim()) return;
+    const timer = setTimeout(() => {
+      geocodeAddress(destination)
+        .then(setDestinationLocation)
+        .catch(() => setDestinationLocation(null));
+    }, 700);
+    return () => clearTimeout(timer);
+  }, [destination]);
+
+  useEffect(() => {
+    const query = activeLocationField === "pickup" ? pickup : destination;
+    if (!activeLocationField || query.trim().length < 3) {
+      setSuggestions([]);
+      return;
+    }
+    const timer = setTimeout(() => {
+      searchLocationSuggestions(query)
+        .then(setSuggestions)
+        .catch(() => setSuggestions([]));
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [activeLocationField, pickup, destination]);
+
   const coordinates = {
     pickup: {
       address: pickup,
-      coordinates: [29.2205, -1.6585] as [number, number],
+      coordinates: pickupLocation
+        ? ([pickupLocation.longitude, pickupLocation.latitude] as [
+            number,
+            number,
+          ])
+        : ([DEFAULT_PICKUP.longitude, DEFAULT_PICKUP.latitude] as [
+            number,
+            number,
+          ]),
     },
     destination: {
       address: destination,
-      coordinates: [29.238, -1.6734] as [number, number],
+      coordinates: destinationLocation
+        ? ([destinationLocation.longitude, destinationLocation.latitude] as [
+            number,
+            number,
+          ])
+        : ([DEFAULT_DESTINATION.longitude, DEFAULT_DESTINATION.latitude] as [
+            number,
+            number,
+          ]),
     },
   };
 
   useEffect(() => {
-    estimateFare({ ...coordinates, category })
-      .then(setEstimate)
-      .catch((requestError) => setError(requestError.message));
-  }, [category, pickup, destination]);
+    let active = true;
+    setEstimates({});
+    if (!pickupLocation || !destinationLocation) {
+      return;
+    }
+    for (const rideCategory of ["STANDARD", "COMFORT", "PREMIUM", "XL"] as const) {
+      estimateFare({ ...coordinates, category: rideCategory })
+        .then(value => { if (active) setEstimates(previous => ({ ...previous, [rideCategory]: value })); })
+        .catch((requestError) => { if (active) setError(requestError.message); });
+    }
+    return () => { active = false; };
+  }, [pickup, destination, pickupLocation, destinationLocation]);
 
   useEffect(() => {
     if (
@@ -112,7 +356,7 @@ export function CustomerHomeScreen() {
     const timer = setInterval(
       () =>
         getTrip(trip._id)
-          .then(setTrip)
+          .then(applyTrip)
           .catch(() => undefined),
       3000,
     );
@@ -124,9 +368,19 @@ export function CustomerHomeScreen() {
     connectSocket().then((connectedSocket) => {
       socket = connectedSocket;
       socket?.emit("trip:join", trip._id);
+      socket?.on("trip:searching", () => setTripState("ASSIGNED"));
       socket?.on("trip:assigned", () => setTripState("ASSIGNED"));
       socket?.on("trip:started", () => setTripState("ON_TRIP"));
       socket?.on("trip:completed", () => setTripState("COMPLETED"));
+      socket?.on(
+        "trip:location_updated",
+        (update: { tripId: string; coordinates: [number, number] }) => {
+          if (update.tripId === trip._id) {
+            const [longitude, latitude] = update.coordinates;
+            setAssignedDriverLocation({ latitude, longitude });
+          }
+        },
+      );
     });
     return () => {
       socket?.disconnect();
@@ -136,9 +390,16 @@ export function CustomerHomeScreen() {
   async function requestTrip() {
     setError("");
     try {
-      const created = await createTrip({ ...coordinates, category });
-      setTrip(created);
-      setTripState("ASSIGNED");
+      if (!pickupLocation || !destinationLocation) {
+        setError("Wait for pickup and destination to appear on the map");
+        return;
+      }
+      const created = await createTrip({
+        ...coordinates,
+        category,
+        paymentMethod,
+      });
+      applyTrip(created);
     } catch (requestError) {
       setError(
         requestError instanceof Error
@@ -148,27 +409,67 @@ export function CustomerHomeScreen() {
     }
   }
 
+  function selectSuggestion(suggestion: LocationSuggestion) {
+    if (activeLocationField === "pickup") {
+      setPickup(suggestion.label);
+      setPickupLocation(suggestion.coordinate);
+      setUsingCurrentPickup(false);
+    } else if (activeLocationField === "destination") {
+      setDestination(suggestion.label);
+      setDestinationLocation(suggestion.coordinate);
+    }
+    setSuggestions([]);
+    setActiveLocationField(null);
+  }
+
+  async function selectMapLocation(coordinate: MapCoordinate) {
+    try {
+      const address = await reverseGeocode(coordinate);
+      if (locationMode === "pickup") {
+        setPickup(address);
+        setPickupLocation(coordinate);
+        setUsingCurrentPickup(false);
+      } else {
+        setDestination(address);
+        setDestinationLocation(coordinate);
+      }
+    } catch (mapError) {
+      setError(
+        mapError instanceof Error
+          ? mapError.message
+          : "Unable to use map location",
+      );
+    }
+  }
+
+  async function finishTrip() {
+    if (!trip?._id || isFinishing) return;
+    setIsFinishing(true);
+    setError("");
+    try {
+      await rateTrip(trip._id, rating);
+      setTripState("IDLE");
+      setTrip(null);
+      setRating(5);
+    } catch (finishError) {
+      setError(
+        finishError instanceof Error
+          ? finishError.message
+          : "Unable to finish trip",
+      );
+    } finally {
+      setIsFinishing(false);
+    }
+  }
+
   return (
     <View style={styles.screen}>
       <ScrollView
         contentContainerStyle={styles.content}
+        keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
-        <View style={styles.mapHeader}>
-          <View>
-            <Text style={styles.eyebrow}>GOOD MORNING, ALICE</Text>
-            <Text style={styles.title}>Where to?</Text>
-          </View>
-          <TouchableOpacity style={styles.avatar}>
-            <Text style={styles.avatarText}>A</Text>
-          </TouchableOpacity>
-        </View>
-        <MapSurface />
-
-        {tripState === "IDLE" && (
-          <View style={styles.sheet}>
-            <Text style={styles.sheetTitle}>Book a ride</Text>
-
+        {tripState === "IDLE" && <View style={{position: "absolute", top: 12, left: 16, right: 16, zIndex: 5}}>
             <View style={styles.searchBox}>
               <View style={styles.searchRail}>
                 <View style={styles.greenDot} />
@@ -178,30 +479,93 @@ export function CustomerHomeScreen() {
               <View style={styles.searchFields}>
                 <TextInput
                   style={styles.locationInput}
-                  value={pickup}
-                  onChangeText={setPickup}
+                  accessibilityLabel="Pickup location" value={pickup}
+                  onFocus={() => {
+                    setLocationMode("pickup");
+                    setActiveLocationField("pickup");
+                  }}
+                  onChangeText={(value) => {
+                    setUsingCurrentPickup(false);
+                    setPickup(value);
+                    setPickupLocation(null);
+                  }}
                   placeholder="Pickup location"
                   placeholderTextColor={colors.muted}
                 />
                 <View style={styles.fieldDivider} />
                 <TextInput
                   style={styles.locationInput}
-                  value={destination}
-                  onChangeText={setDestination}
+                  accessibilityLabel="Destination" value={destination}
+                  onFocus={() => {
+                    setLocationMode("destination");
+                    setActiveLocationField("destination");
+                  }}
+                  onChangeText={(value) => {
+                    setDestination(value);
+                    setDestinationLocation(null);
+                  }}
                   placeholder="Where to?"
                   placeholderTextColor={colors.muted}
                 />
               </View>
             </View>
-            <Text style={styles.sectionLabel}>Choose a ride</Text>
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.rideOptions}
-            >
-              {(["STANDARD", "COMFORT", "PREMIUM"] as const).map((cat) => (
+            {suggestions.length > 0 && (
+              <View style={styles.suggestions}>
+                {suggestions.map((suggestion) => (
+                  <TouchableOpacity
+                    key={suggestion.id}
+                    style={styles.suggestion}
+                    onPress={() => selectSuggestion(suggestion)}
+                  >
+                    <Text style={styles.suggestionText}>
+                      {suggestion.label}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
+            <View style={styles.mapModeRow}>
+              <Text style={styles.sectionLabel}>Tap map to set</Text>
+              {(["pickup", "destination"] as const).map((mode) => (
                 <TouchableOpacity
-                  key={cat}
+                  key={mode}
+                  onPress={() => setLocationMode(mode)}
+                  style={[
+                    styles.mapMode,
+                    locationMode === mode && styles.mapModeActive,
+                  ]}
+                >
+                  <Text style={styles.mapModeText}>
+                    {mode === "pickup" ? "Pickup" : "Drop-off"}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+</View>}
+        <MapSurface
+          pickup={pickupLocation || currentLocation}
+          destination={destinationLocation}
+          route={route}
+          nearbyDrivers={nearbyDrivers}
+          assignedDriverLocation={assignedDriverLocation}
+          onMapPress={tripState === "IDLE" ? selectMapLocation : undefined}
+        />
+
+        {tripState === "IDLE" && (
+          <View style={styles.sheet}>
+            <View style={styles.sheetHandle} />
+            <View style={styles.sheetHeading}>
+              <Text style={styles.sheetTitle}>Choose a Ride</Text>
+              <Text style={styles.nearbyLabel}>
+                {nearbyDrivers.length} nearby
+              </Text>
+            </View>
+
+
+            <View style={styles.rideOptions}>
+              {(["STANDARD", "COMFORT", "PREMIUM", "XL"] as const).map((cat) => (
+                <TouchableOpacity
+                  accessibilityRole="radio" accessibilityState={{checked: category === cat}} key={cat}
                   onPress={() => setCategory(cat)}
                   style={[
                     styles.rideOption,
@@ -214,40 +578,38 @@ export function CustomerHomeScreen() {
                       category === cat && styles.carGlyphActive,
                     ]}
                   >
-                    <Text style={styles.carGlyphText}>2G</Text>
+                    <CarIcon active={category === cat} />
                   </View>
-                  <View>
+                  <View style={{flex: 1}}>
                     <Text style={styles.rideName}>
-                      2GO {cat[0] + cat.slice(1).toLowerCase()}
+                      2Go {cat[0] + cat.slice(1).toLowerCase()}
                     </Text>
                     <Text style={styles.rideMeta}>
-                      {cat === "STANDARD"
-                        ? "4 min"
-                        : cat === "COMFORT"
-                          ? "6 min"
-                          : "8 min"}{" "}
-                      away
+                      {etaMinutes ? `${etaMinutes} min` : "Route pending"} away
                     </Text>
                   </View>
                   <Text style={styles.ridePrice}>
-                    {cat === category && estimate
-                      ? `RWF ${Math.round(estimate.estimatedFare).toLocaleString()}`
-                      : "Calculating"}
+                    {estimates[cat]
+                      ? `${estimates[cat]!.currency} ${Math.round(estimates[cat]!.estimatedFare).toLocaleString()}`
+                      : "—"}
                   </Text>
                 </TouchableOpacity>
               ))}
-            </ScrollView>
-            <View style={styles.paymentRow}>
+            </View>
+            <View style={[styles.paymentRow, styles.disabledFeature]}>
               <Text style={styles.paymentIcon}>R</Text>
-              <Text style={styles.paymentText}>Cash</Text>
-              <Text style={styles.chevron}>›</Text>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.paymentText}>Cash payment</Text>
+                <Text style={styles.disabledFeatureText}>Online payments are not available yet</Text>
+              </View>
+              <Text style={styles.comingSoon}>COMING SOON</Text>
             </View>
             <TouchableOpacity
               style={styles.primaryButton}
               onPress={requestTrip}
             >
               <Text style={styles.primaryButtonText}>
-                Confirm 2GO {category} ·{" "}
+                Confirm 2Go {category[0] + category.slice(1).toLowerCase()} ·{" "}
                 {estimate
                   ? `RWF ${Math.round(estimate.estimatedFare).toLocaleString()}`
                   : "Calculating..."}
@@ -259,83 +621,97 @@ export function CustomerHomeScreen() {
 
         {tripState === "ASSIGNED" && (
           <View style={styles.sheet}>
+            <View style={ui.handle}/>
             <View style={styles.statusLine}>
               <View style={styles.liveDot} />
               <Text style={styles.statusText}>DRIVER ON THE WAY</Text>
-              <Text style={styles.eta}>3 min</Text>
+              <Text style={styles.eta}>
+                {etaMinutes ? `${etaMinutes} min` : "--"}
+              </Text>
             </View>
             <Text style={styles.sheetTitle}>
               {trip?.status === "SEARCHING_DRIVER"
                 ? "Finding your driver"
                 : "Your driver is heading to you"}
             </Text>
-            <Text style={styles.subText}>
-              Toyota Camry · 2GO-NY-909 · ★ 4.95
-            </Text>
-            <View style={styles.tripRoute}>
-              <Text style={styles.routeText}>Pickup · {pickup}</Text>
-              <Text style={styles.routeText}>Destination · {destination}</Text>
-            </View>
+            <PersonCard name={trip?.driverId?.userId?.name || "Matching your driver"} detail={trip?.driverId?.activeVehicleId ? `${trip.driverId.activeVehicleId.make || ""} ${trip.driverId.activeVehicleId.model || ""}` : "Driver details appear after assignment"} badge={trip?.driverId?.rating ? `★ ${trip.driverId.rating.toFixed(1)}` : undefined}/>
+            {trip?.driverId?.activeVehicleId?.plateNumber && <Text style={styles.plate}>{trip.driverId.activeVehicleId.plateNumber}</Text>}
+            <RouteCard pickup={pickup} destination={destination}/>
             <TouchableOpacity
               style={styles.primaryButton}
-              onPress={() => setTripState("ON_TRIP")}
+              onPress={() =>
+                getTrip(trip?._id || "")
+                  .then(applyTrip)
+                  .catch(() => undefined)
+              }
             >
-              <Text style={styles.primaryButtonText}>
-                Simulate driver arrival
-              </Text>
+              <Text style={styles.primaryButtonText}>Refresh trip status</Text>
             </TouchableOpacity>
           </View>
         )}
 
         {tripState === "ON_TRIP" && (
           <View style={styles.sheet}>
-            <View style={[styles.statusLine, { backgroundColor: "#123c70" }]}>
+            <View style={[styles.statusLine, { backgroundColor: "#174039" }]}>
               <View style={styles.liveDot} />
               <Text style={styles.statusText}>TRIP IN PROGRESS</Text>
             </View>
             <Text style={styles.sheetTitle}>Heading to {destination}</Text>
             <Text style={styles.subText}>Live trip tracking is active</Text>
+            <PersonCard name={trip?.driverId?.userId?.name || "Matching your driver"} detail={trip?.driverId?.activeVehicleId ? `${trip.driverId.activeVehicleId.make || ""} ${trip.driverId.activeVehicleId.model || ""}` : "Driver details appear after assignment"} badge={trip?.driverId?.rating ? `★ ${trip.driverId.rating.toFixed(1)}` : undefined}/>
+            {trip?.driverId?.activeVehicleId?.plateNumber && <Text style={styles.plate}>{trip.driverId.activeVehicleId.plateNumber}</Text>}
+            <RouteCard pickup={pickup} destination={destination}/>
             <TouchableOpacity
               style={styles.primaryButton}
-              onPress={() => setTripState("COMPLETED")}
+              onPress={() =>
+                getTrip(trip?._id || "")
+                  .then(applyTrip)
+                  .catch(() => undefined)
+              }
             >
-              <Text style={styles.primaryButtonText}>
-                Simulate trip completion
-              </Text>
+              <Text style={styles.primaryButtonText}>Refresh trip status</Text>
             </TouchableOpacity>
           </View>
         )}
 
         {tripState === "COMPLETED" && (
           <View style={styles.sheet}>
-            <Text style={styles.sheetTitle}>Trip completed</Text>
+            <View style={ui.success}><Text style={ui.check}>✓</Text><Text style={ui.label}>TRIP COMPLETED</Text><Text style={ui.successTitle}>You have arrived!</Text><Text style={ui.muted}>Thank you for riding with 2Go.</Text></View><RouteCard pickup={pickup} destination={destination}/><PersonCard name={trip?.driverId?.userId?.name || "Your driver"} detail="Rate your trip"/>
             <Text style={styles.fare}>
               RWF{" "}
               {Math.round(
-                trip?.finalFare || trip?.estimatedFare || 0,
+                trip?.finalFare ?? trip?.estimatedFare ?? 0,
               ).toLocaleString()}
             </Text>
-            <Text style={styles.subText}>
-              Cash collected · Rate your driver
-            </Text>
+            <Text style={styles.subText}>Rate your driver</Text>
             <View style={styles.ratingRow}>
               {[1, 2, 3, 4, 5].map((star) => (
-                <TouchableOpacity key={star} onPress={() => setRating(star)}>
+                <TouchableOpacity accessibilityLabel={`Rate ${star} out of 5 stars`} accessibilityRole="radio" accessibilityState={{checked: star === rating}} key={star} onPress={() => setRating(star)}>
                   <Text style={styles.star}>{star <= rating ? "★" : "☆"}</Text>
                 </TouchableOpacity>
               ))}
             </View>
+            <View style={ui.receipt}>
+              <Text style={ui.heading}>Fare summary</Text>
+              <View style={ui.receiptRow}><Text style={ui.muted}>Distance</Text><Text style={ui.body}>{trip?.distanceKm.toFixed(1)} km</Text></View>
+              <View style={ui.receiptRow}><Text style={ui.muted}>Estimated duration</Text><Text style={ui.body}>{trip?.estimatedDurationMinutes} min</Text></View>
+              <View style={ui.receiptRow}><Text style={ui.heading}>Trip total</Text><Text style={ui.total}>RWF {Math.round(trip?.finalFare ?? trip?.estimatedFare ?? 0).toLocaleString()}</Text></View>
+            </View>
             <TouchableOpacity
               style={styles.primaryButton}
-              onPress={() => setTripState("IDLE")}
+              onPress={finishTrip}
+              disabled={isFinishing}
             >
-              <Text style={styles.primaryButtonText}>Finish</Text>
+              <Text style={styles.primaryButtonText}>
+                {isFinishing ? "Saving..." : "Done & submit review"}
+              </Text>
             </TouchableOpacity>
+            {!!error && <Text style={styles.error}>{error}</Text>}
           </View>
         )}
       </ScrollView>
       <View style={styles.bottomNav}>
-        <NavItem icon="⌂" label="Home" active />
+        <NavItem icon="◎" label="Rides" active />
         <NavItem icon="◷" label="Activity" />
         <NavItem icon="$" label="Wallet" />
         <NavItem icon="○" label="Profile" />
@@ -354,14 +730,15 @@ function NavItem({
   active?: boolean;
 }) {
   return (
-    <TouchableOpacity style={styles.navItem}>
+    <View style={styles.navItem}>
       <Text style={[styles.navIcon, active && styles.navActive]}>{icon}</Text>
       <Text style={[styles.navLabel, active && styles.navActive]}>{label}</Text>
-    </TouchableOpacity>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
+  plate: {color: colors.ink, backgroundColor: "#303a40", padding: 10, borderRadius: 8, alignSelf: "flex-end", fontWeight: "700"},
   screen: { flex: 1, backgroundColor: colors.navy },
   content: { paddingBottom: 92 },
   mapHeader: {
@@ -390,10 +767,10 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   avatarText: { color: colors.ink, fontWeight: "900", fontSize: 16 },
-  mapContainer: { height: 340, position: "relative" },
+  mapContainer: { height: 390, position: "relative" },
   map: {
-    height: 340,
-    backgroundColor: "#b3c8d1",
+    height: 390,
+    backgroundColor: "#1d282d",
     overflow: "hidden",
     position: "relative",
   },
@@ -443,14 +820,19 @@ const styles = StyleSheet.create({
   pinCore: { width: 5, height: 5, borderRadius: 3, backgroundColor: "#fff" },
   mapLabel: {
     position: "absolute",
-    top: 95,
-    left: 132,
-    backgroundColor: "#fff",
+    bottom: 30,
+    left: 12,
+    backgroundColor: "#1c252a",
     paddingHorizontal: 9,
     paddingVertical: 5,
     borderRadius: 7,
   },
-  mapLabelText: { color: "#152337", fontSize: 10, fontWeight: "700" },
+  mapLabelText: {
+    color: "#b7cbd0",
+    fontSize: 9,
+    fontWeight: "800",
+    letterSpacing: 0.8,
+  },
   locationButton: {
     position: "absolute",
     right: 18,
@@ -458,41 +840,55 @@ const styles = StyleSheet.create({
     width: 38,
     height: 38,
     borderRadius: 19,
-    backgroundColor: "#fff",
+    backgroundColor: "#202b31",
     alignItems: "center",
     justifyContent: "center",
   },
   locationIcon: { color: colors.blue, fontSize: 25, lineHeight: 26 },
   sheet: {
     backgroundColor: colors.panel,
-    borderTopLeftRadius: 26,
-    borderTopRightRadius: 26,
+    borderTopLeftRadius: 18,
+    borderTopRightRadius: 18,
     marginTop: -22,
     padding: 20,
     zIndex: 3,
     borderWidth: 1,
     borderColor: colors.line,
   },
+  sheetHandle: {
+    width: 42,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: "#3a484e",
+    alignSelf: "center",
+    marginBottom: 12,
+  },
+  sheetHeading: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  nearbyLabel: { color: "#9ee9db", fontSize: 10, fontWeight: "800" },
   sheetTitle: {
     color: colors.ink,
-    fontSize: 22,
+    fontSize: 20,
     fontWeight: "900",
     marginBottom: 14,
   },
   searchBox: {
     flexDirection: "row",
-    backgroundColor: "#0b1729",
+    backgroundColor: "#1c2429",
     borderRadius: 14,
     padding: 13,
     borderWidth: 1,
-    borderColor: colors.line,
+    borderColor: "#2b363c",
   },
   searchRail: { alignItems: "center", width: 18, paddingTop: 6 },
   greenDot: {
     width: 9,
     height: 9,
     borderRadius: 5,
-    backgroundColor: "#2ac979",
+    backgroundColor: colors.blue,
   },
   blueDot: {
     width: 9,
@@ -509,6 +905,31 @@ const styles = StyleSheet.create({
   searchFields: { flex: 1 },
   locationInput: { color: colors.ink, fontSize: 14, height: 32, padding: 0 },
   fieldDivider: { height: 1, backgroundColor: colors.line },
+  suggestions: {
+    backgroundColor: "#0e1519",
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: 12,
+    marginTop: 6,
+    overflow: "hidden",
+  },
+  suggestion: {
+    paddingHorizontal: 12,
+    paddingVertical: 11,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.line,
+  },
+  suggestionText: { color: "#cbd7e7", fontSize: 12, lineHeight: 17 },
+  mapModeRow: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "#171e22", paddingHorizontal: 12, paddingBottom: 6, borderRadius: 12 },
+  mapMode: {
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: 14,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  mapModeActive: { borderColor: colors.blue, backgroundColor: "#173b43" },
+  mapModeText: { color: colors.ink, fontSize: 11, fontWeight: "700" },
   sectionLabel: {
     color: colors.muted,
     fontSize: 11,
@@ -520,28 +941,28 @@ const styles = StyleSheet.create({
   },
   rideOptions: { gap: 9 },
   rideOption: {
-    minWidth: 210,
+    width: "100%",
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#0b1729",
-    borderRadius: 12,
+    backgroundColor: "#1b2328",
+    borderRadius: 13,
     borderWidth: 1,
     borderColor: colors.line,
     padding: 11,
     gap: 10,
   },
-  rideOptionActive: { borderColor: colors.blue, backgroundColor: "#102b51" },
+  rideOptionActive: { borderLeftWidth: 5, borderLeftColor: colors.blue, backgroundColor: "#20282d" },
   carGlyph: {
-    width: 38,
-    height: 28,
+    width: 48,
+    height: 48,
     borderRadius: 8,
-    backgroundColor: "#253550",
+    backgroundColor: "#2b353a",
     alignItems: "center",
     justifyContent: "center",
   },
-  carGlyphActive: { backgroundColor: colors.blue },
+  carGlyphActive: { backgroundColor: "#173b43" },
   carGlyphText: { color: colors.ink, fontSize: 10, fontWeight: "900" },
-  rideName: { color: colors.ink, fontSize: 12, fontWeight: "800" },
+  rideName: { color: colors.ink, fontSize: 16, fontWeight: "600" },
   rideMeta: { color: colors.muted, fontSize: 11, marginTop: 3 },
   ridePrice: {
     color: colors.ink,
@@ -560,28 +981,46 @@ const styles = StyleSheet.create({
     width: 24,
     height: 24,
     borderRadius: 12,
-    backgroundColor: "#20af68",
-    color: "#071120",
+    backgroundColor: "#39e6b0",
+    color: "#071015",
     textAlign: "center",
     lineHeight: 24,
     fontWeight: "900",
   },
   paymentText: { color: colors.ink, fontWeight: "700", marginLeft: 10 },
+  disabledFeature: { opacity: 0.48 },
+  disabledFeatureText: { color: colors.muted, fontSize: 10, marginLeft: 10, marginTop: 3 },
+  comingSoon: { color: colors.muted, fontSize: 9, fontWeight: "800", letterSpacing: 0.6 },
   chevron: { color: colors.muted, fontSize: 25, marginLeft: "auto" },
+  paymentOptions: {
+    flexDirection: "row",
+    gap: 8,
+    marginTop: 10,
+    flexWrap: "wrap",
+  },
+  paymentOption: {
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  paymentOptionActive: { borderColor: "#39e6b0", backgroundColor: "#123b35" },
+  paymentOptionText: { color: colors.ink, fontSize: 11, fontWeight: "700" },
   primaryButton: {
     backgroundColor: colors.blue,
-    minHeight: 50,
+    minHeight: 56,
     borderRadius: 12,
     alignItems: "center",
     justifyContent: "center",
     marginTop: 16,
     paddingHorizontal: 12,
   },
-  primaryButtonText: { color: "#fff", fontSize: 14, fontWeight: "900" },
+  primaryButtonText: { color: "#071015", fontSize: 14, fontWeight: "900" },
   statusLine: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#123b2d",
+    backgroundColor: "#123b35",
     borderRadius: 8,
     padding: 9,
     marginBottom: 14,
@@ -594,7 +1033,7 @@ const styles = StyleSheet.create({
     marginRight: 7,
   },
   statusText: {
-    color: "#65e8a6",
+    color: "#67ebc7",
     fontSize: 11,
     fontWeight: "900",
     letterSpacing: 0.5,
@@ -602,7 +1041,7 @@ const styles = StyleSheet.create({
   eta: { color: colors.ink, fontWeight: "900", marginLeft: "auto" },
   subText: { color: colors.muted, fontSize: 13, marginBottom: 12 },
   tripRoute: {
-    backgroundColor: "#0b1729",
+    backgroundColor: "#1c2429",
     borderRadius: 12,
     padding: 13,
     gap: 10,
@@ -614,15 +1053,15 @@ const styles = StyleSheet.create({
     fontWeight: "900",
     marginBottom: 3,
   },
-  ratingRow: { flexDirection: "row", gap: 13, marginVertical: 8 },
-  star: { color: "#ffc857", fontSize: 30 },
+  ratingRow: { flexDirection: "row", justifyContent: "center", gap: 14, marginVertical: 18 },
+  star: { color: "#ffc857", fontSize: 38 },
   bottomNav: {
     position: "absolute",
     bottom: 0,
     left: 0,
     right: 0,
     height: 72,
-    backgroundColor: "#0b1729",
+    backgroundColor: "#0e1519",
     borderTopWidth: 1,
     borderTopColor: colors.line,
     flexDirection: "row",

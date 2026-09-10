@@ -56,21 +56,21 @@ function AppContent() {
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      <StatusBar barStyle="light-content" backgroundColor="#090d16" />
+      <StatusBar barStyle="light-content" backgroundColor="#0e1519" />
 
       <View style={styles.sessionBar}>
-        <Text style={styles.sessionName}>{user.name}</Text>
-        <Text style={styles.sessionRole}>{user.role}</Text>
-        <TouchableOpacity onPress={() => logout().then(() => setUser(null))}>
+        <Text style={styles.sessionName}>2Go</Text>
+        <Text style={styles.sessionRole}>{user.role === "CUSTOMER" ? "RIDER" : "DRIVER PARTNER"}</Text>
+        <TouchableOpacity style={{ marginLeft: "auto", padding: 12 }} accessibilityLabel="Sign out" onPress={() => logout().then(() => setUser(null))}>
           <Text style={styles.sessionLogout}>Sign out</Text>
         </TouchableOpacity>
       </View>
 
       <View style={styles.content}>
         {user.role === "CUSTOMER" ? (
-          <CustomerHomeScreen />
+          <CustomerHomeScreen userName={user.name} />
         ) : (
-          <DriverHomeScreen />
+          <DriverHomeScreen userName={user.name} />
         )}
       </View>
     </SafeAreaView>
@@ -80,47 +80,47 @@ function AppContent() {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: "#090d16",
+    backgroundColor: "#0e1519",
   },
   sessionBar: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#101a2d",
-    marginHorizontal: 16,
-    marginTop: 8,
-    borderRadius: 14,
-    padding: 5,
-    borderWidth: 1,
-    borderColor: "#24324d",
+    backgroundColor: "#0e1519",
+    marginHorizontal: 0,
+    marginTop: 0,
+    borderRadius: 0,
+    padding: 8,
+    borderBottomWidth: 1,
+    borderColor: "#242c31",
   },
   sessionName: {
     paddingLeft: 10,
     color: "#f8fafc",
-    fontSize: 13,
+    fontSize: 22,
     fontWeight: "900",
     letterSpacing: 1,
   },
   sessionRole: {
-    color: "#30c979",
+    color: "#a9b9be",
     fontSize: 12,
     fontWeight: "800",
     marginLeft: 3,
   },
   sessionLogout: {
-    color: "#8fb8ef",
+    color: "#a9b9be",
     fontSize: 12,
     fontWeight: "800",
     marginLeft: "auto",
   },
   loading: {
     flex: 1,
-    backgroundColor: "#071120",
+    backgroundColor: "#0e1519",
     alignItems: "center",
     justifyContent: "center",
     padding: 28,
   },
   modeLabel: {
-    color: "#1677ff",
+    color: "#00d4ed",
     fontSize: 24,
     fontWeight: "900",
     letterSpacing: 2,
@@ -133,7 +133,7 @@ const styles = StyleSheet.create({
     lineHeight: 21,
   },
   signOut: {
-    backgroundColor: "#1677ff",
+    backgroundColor: "#00d4ed",
     paddingHorizontal: 24,
     paddingVertical: 13,
     borderRadius: 11,
