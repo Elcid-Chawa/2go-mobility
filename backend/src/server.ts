@@ -52,6 +52,7 @@ const startServer = async () => {
     io.on("connection", (socket) => {
       logger.info(`Socket connected: ${socket.id}`);
       socket.join(`user:${socket.data.userId}`);
+      if (socket.data.role === "CUSTOMER") socket.join("customers");
       if (socket.data.role === "OPERATIONS" || socket.data.role === "ADMIN")
         socket.join("operations");
 

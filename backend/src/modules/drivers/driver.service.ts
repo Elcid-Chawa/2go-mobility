@@ -1,10 +1,52 @@
 import { Driver, IDriver } from "./driver.model";
 import {
+  DriverApprovalStatus,
   DriverAvailabilityStatus,
   DriverOnlineStatus,
 } from "../../constants/tripStatus";
+import { VehicleCategory } from "../../constants/vehicleCategory";
 
 export class DriverService {
+  static async getNearbyDrivers(
+    longitude: number,
+    latitude: number,
+    radiusKm: number,
+    category?: VehicleCategory,
+  ): Promise<any[]> {
+    const drivers = await Driver.find({
+      approvalStatus: DriverApprovalStatus.APPROVED,
+      onlineStatus: DriverOnlineStatus.ONLINE,
+      availabilityStatus: DriverAvailabilityStatus.AVAILABLE,
+      lastLocationUpdate: { $gte: new Date(Date.now() - 2 * 60 * 1000) },
+      currentLocation: {
+        $near: {
+          $geometry: { type: "Point", coordinates: [longitude, latitude] },
+          $maxDistance: radiusKm * 1000,
+        },
+      },
+    })
+      .populate("userId", "name")
+      .populate("activeVehicleId", "category make model color");
+
+    return drivers
+      .filter((driver) => {
+        const vehicle = driver.activeVehicleId as any;
+        return !category || !vehicle || vehicle.category === category;
+      })
+      .map((driver) => {
+        const vehicle = driver.activeVehicleId as any;
+        return {
+          driverId: driver._id,
+          name: (driver.userId as any)?.name,
+          rating: driver.rating,
+          heading: driver.currentHeading || 0,
+          category: vehicle?.category,
+          location: driver.currentLocation,
+          lastLocationUpdate: driver.lastLocationUpdate,
+        };
+      });
+  }
+
   static async getProfileByUserId(userId: string): Promise<any> {
     const driver = await Driver.findOne({ userId })
       .populate("userId", "name email phone role status")
