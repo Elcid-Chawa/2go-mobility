@@ -12,7 +12,10 @@ export class CustomerService {
 
   static async updateProfile(userId: string, data: { name?: string; phone?: string }): Promise<any> {
     if (data.name || data.phone) {
-      await User.findByIdAndUpdate(userId, { $set: data });
+      const updates: { name?: string; phone?: string } = {};
+      if (data.name?.trim()) updates.name = data.name.trim().slice(0, 100);
+      if (data.phone?.trim()) updates.phone = data.phone.trim().slice(0, 30);
+      await User.findByIdAndUpdate(userId, { $set: updates });
     }
     return this.getProfileByUserId(userId);
   }

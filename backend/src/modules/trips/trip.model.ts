@@ -13,6 +13,7 @@ export interface ITripLocationPoint {
 export interface ITrip extends Document {
   customerId: mongoose.Types.ObjectId;
   driverId?: mongoose.Types.ObjectId;
+  rejectedDriverIds: mongoose.Types.ObjectId[];
   vehicleId?: mongoose.Types.ObjectId;
   pickup: ITripLocationPoint;
   destination: ITripLocationPoint;
@@ -20,6 +21,7 @@ export interface ITrip extends Document {
   estimatedDurationMinutes: number;
   estimatedFare: number;
   finalFare?: number;
+  waitingFare?: number;
   category: VehicleCategory;
   status: TripStatus;
   paymentStatus: PaymentStatus;
@@ -53,6 +55,10 @@ const TripSchema = new Schema<ITrip>(
       ref: 'Driver',
       index: true,
     },
+    rejectedDriverIds: [{
+      type: Schema.Types.ObjectId,
+      ref: 'Driver',
+    }],
     vehicleId: {
       type: Schema.Types.ObjectId,
       ref: 'Vehicle',
@@ -99,6 +105,10 @@ const TripSchema = new Schema<ITrip>(
     },
     finalFare: {
       type: Number,
+    },
+    waitingFare: {
+      type: Number,
+      default: 0,
     },
     category: {
       type: String,

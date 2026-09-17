@@ -27,9 +27,65 @@ export interface CreateTripDTO {
   };
   category?: VehicleCategory;
   paymentMethod?: PaymentMethod;
+  routedDistanceKm?: number;
 }
 
 export class TripService {
+  static async getCustomerTripHistory(userId: string): Promise<ITrip[]> {
+    const customer = await Customer.findOne({ userId }).select("_id");
+    if (!customer) {
+      throw { statusCode: 404, message: "Customer profile not found" };
+    }
+
+    return Trip.find({ customerId: customer._id })
+      .sort({ createdAt: -1 })
+      .limit(50)
+      .populate({
+        path: "driverId",
+        populate: [
+          { path: "userId", select: "name phone" },
+          { path: "activeVehicleId" },
+        ],
+      });
+  }
+
+  static async getActiveTrip(
+    userId: string,
+    userRole?: UserRole,
+  ): Promise<ITrip | null> {
+    const terminalStatuses = [TripStatus.RATED, TripStatus.CANCELLED];
+    let ownerQuery: Record<string, unknown> = {};
+
+    if (userRole === UserRole.CUSTOMER) {
+      const customer = await Customer.findOne({ userId }).select("_id");
+      if (!customer) return null;
+      ownerQuery = { customerId: customer._id };
+    } else if (userRole === UserRole.DRIVER) {
+      const driver = await Driver.findOne({ userId }).select("_id");
+      if (!driver) return null;
+      ownerQuery = { driverId: driver._id };
+    } else {
+      throw { statusCode: 403, message: "Active rides are only available to riders and drivers." };
+    }
+
+    return Trip.findOne({
+      ...ownerQuery,
+      status: { $nin: terminalStatuses },
+    })
+      .sort({ createdAt: -1 })
+      .populate({
+        path: "customerId",
+        populate: { path: "userId", select: "name phone email" },
+      })
+      .populate({
+        path: "driverId",
+        populate: [
+          { path: "userId", select: "name phone email" },
+          { path: "activeVehicleId" },
+        ],
+      });
+  }
+
   /**
    * Allowed state transitions map
    */
@@ -94,6 +150,7 @@ export class TripService {
       pickup.coordinates,
       destination.coordinates,
       category,
+      dto.routedDistanceKm,
     );
 
     const trip = new Trip({
@@ -328,7 +385,12 @@ export class TripService {
     this.validateTransition(trip.status, TripStatus.TRIP_COMPLETED);
 
     trip.status = TripStatus.TRIP_COMPLETED;
-    trip.finalFare = trip.estimatedFare; // In MVP finalFare matches estimated or recalculated
+    const pickupWaitMinutes = trip.timestamps.arrivedAt && trip.timestamps.startedAt
+      ? Math.max(0, (trip.timestamps.startedAt.getTime() - trip.timestamps.arrivedAt.getTime()) / 60000)
+      : 0;
+    const chargeableWaitingBlocks = Math.ceil(Math.max(0, pickupWaitMinutes - 15) / 15);
+    trip.waitingFare = chargeableWaitingBlocks * 1500;
+    trip.finalFare = trip.estimatedFare + trip.waitingFare;
     trip.timestamps.completedAt = new Date();
     await trip.save();
 
@@ -364,6 +426,20 @@ export class TripService {
       throw { statusCode: 404, message: "Trip not found" };
     }
 
+    if (
+      trip.status === TripStatus.TRIP_STARTED ||
+      trip.status === TripStatus.TRIP_COMPLETED ||
+      trip.status === TripStatus.PAYMENT_PENDING ||
+      trip.status === TripStatus.PAID ||
+      trip.status === TripStatus.RATED ||
+      trip.status === TripStatus.CANCELLED
+    ) {
+      throw {
+        statusCode: 409,
+        message: "This ride can no longer be cancelled in the app. Contact support for an active-trip safety issue.",
+      };
+    }
+
     if (userRole !== UserRole.ADMIN && userRole !== UserRole.OPERATIONS) {
       const customer = await Customer.findOne({ userId });
       const driver = await Driver.findOne({ userId });
@@ -384,7 +460,7 @@ export class TripService {
     this.validateTransition(trip.status, TripStatus.CANCELLED);
 
     trip.status = TripStatus.CANCELLED;
-    trip.cancellationReason = reason;
+    trip.cancellationReason = (reason || "Cancelled by user").trim().slice(0, 240);
     trip.cancelledBy = new mongoose.Types.ObjectId(userId);
     trip.timestamps.cancelledAt = new Date();
     await trip.save();
@@ -399,6 +475,7 @@ export class TripService {
       io.to(`trip:${trip._id}`).emit("trip:cancelled", {
         tripId: trip._id,
         reason,
+        cancelledBy: userRole,
       });
       io.to("operations").emit("trip:cancelled", { tripId: trip._id, reason });
     }

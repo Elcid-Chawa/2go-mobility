@@ -9,6 +9,8 @@ router.use(authenticate);
 
 // Customer endpoints
 router.post('/', requireRoles(UserRole.CUSTOMER, UserRole.ADMIN), TripController.createTrip);
+router.get('/history', requireRoles(UserRole.CUSTOMER), TripController.getCustomerHistory);
+router.get('/active', requireRoles(UserRole.CUSTOMER, UserRole.DRIVER), TripController.getActiveTrip);
 router.get('/:id', TripController.getTrip);
 
 // Driver lifecycle endpoints

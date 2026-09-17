@@ -128,6 +128,19 @@ describe("2GO Full Ride-Hailing Vertical Slice Lifecycle E2E", () => {
     expect(tripDetails.body.data.status).toBe(TripStatus.DRIVER_ASSIGNED);
     expect(tripDetails.body.data.driverId._id).toBe(driverProfileId);
 
+    const driverActiveRide = await request(app)
+      .get("/api/v1/trips/active")
+      .set("Authorization", `Bearer ${driverToken}`);
+    expect(driverActiveRide.status).toBe(200);
+    expect(driverActiveRide.body.data._id).toBe(tripId);
+    expect(driverActiveRide.body.data.status).toBe(TripStatus.DRIVER_ASSIGNED);
+
+    const customerActiveRide = await request(app)
+      .get("/api/v1/trips/active")
+      .set("Authorization", `Bearer ${customerToken}`);
+    expect(customerActiveRide.status).toBe(200);
+    expect(customerActiveRide.body.data._id).toBe(tripId);
+
     // 5. Driver accepts trip (and duplicate acceptance is prevented)
     const acceptRes = await request(app)
       .post(`/api/v1/trips/${tripId}/accept`)
@@ -186,6 +199,13 @@ describe("2GO Full Ride-Hailing Vertical Slice Lifecycle E2E", () => {
       });
     expect(rateRes.status).toBe(201);
     expect(rateRes.body.data.score).toBe(5);
+
+    const historyRes = await request(app)
+      .get("/api/v1/trips/history")
+      .set("Authorization", `Bearer ${customerToken}`);
+    expect(historyRes.status).toBe(200);
+    expect(historyRes.body.data).toHaveLength(1);
+    expect(historyRes.body.data[0]._id).toBe(tripId);
 
     // Duplicate rating is rejected
     const dupRateRes = await request(app)

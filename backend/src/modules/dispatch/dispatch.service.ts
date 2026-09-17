@@ -24,8 +24,10 @@ export class DispatchService {
     pickupCoordinates: [number, number], // [lng, lat]
     category: VehicleCategory,
     maxDistanceMeters: number = env.DISPATCH_SEARCH_RADIUS_KM * 1000,
+    excludedDriverIds: mongoose.Types.ObjectId[] = [],
   ): Promise<IDriver[]> {
     const query: any = {
+      ...(excludedDriverIds.length ? { _id: { $nin: excludedDriverIds } } : {}),
       approvalStatus: DriverApprovalStatus.APPROVED,
       onlineStatus: DriverOnlineStatus.ONLINE,
       availabilityStatus: DriverAvailabilityStatus.AVAILABLE,
@@ -78,10 +80,24 @@ export class DispatchService {
     const eligibleDrivers = await this.findEligibleDrivers(
       trip.pickup.location.coordinates,
       trip.category,
+      env.DISPATCH_SEARCH_RADIUS_KM * 1000,
+      trip.rejectedDriverIds || [],
     );
 
     if (eligibleDrivers.length === 0) {
       logger.warn(`No eligible drivers found for trip ${trip._id}`);
+      const retryTimer = setTimeout(async () => {
+        try {
+          const stillSearching = await Trip.exists({
+            _id: trip._id,
+            status: TripStatus.SEARCHING_DRIVER,
+          });
+          if (stillSearching) await this.dispatchTrip(tripId, io);
+        } catch (error) {
+          logger.error(`Unable to retry dispatch for trip ${trip._id}`, { error });
+        }
+      }, 5000);
+      retryTimer.unref?.();
       return false;
     }
 
@@ -125,7 +141,10 @@ export class DispatchService {
           driverId: candidate._id,
           status: TripStatus.DRIVER_ASSIGNED,
         },
-        { $set: { status: TripStatus.SEARCHING_DRIVER, driverId: null } },
+        {
+          $set: { status: TripStatus.SEARCHING_DRIVER, driverId: null },
+          $addToSet: { rejectedDriverIds: candidate._id },
+        },
         { new: true },
       );
       if (expired) {
@@ -210,15 +229,16 @@ export class DispatchService {
     io?: any,
   ): Promise<void> {
     const driver = await Driver.findOne({ userId: driverUserId });
-    if (driver) {
-      driver.availabilityStatus = DriverAvailabilityStatus.AVAILABLE;
-      await driver.save();
+    if (!driver) {
+      throw { statusCode: 404, message: "Driver profile not found" };
     }
+    driver.availabilityStatus = DriverAvailabilityStatus.AVAILABLE;
+    await driver.save();
 
     const trip = await Trip.findOneAndUpdate(
       {
         _id: tripId,
-        driverId: driver?._id,
+        driverId: driver._id,
         status: TripStatus.DRIVER_ASSIGNED,
       },
       {
@@ -226,6 +246,7 @@ export class DispatchService {
           status: TripStatus.SEARCHING_DRIVER,
           driverId: null,
         },
+        $addToSet: { rejectedDriverIds: driver._id },
       },
       { new: true },
     );

@@ -10,7 +10,7 @@ export class PricingController {
     next: NextFunction,
   ): Promise<void> {
     try {
-      const { pickup, destination, category } = req.body;
+      const { pickup, destination, category, routedDistanceKm } = req.body;
       const pickupLocation = await resolveLocationValue(pickup);
       const destinationLocation = await resolveLocationValue(destination);
 
@@ -19,12 +19,14 @@ export class PricingController {
           pickupLocation.coordinates,
           destinationLocation.coordinates,
           category,
+          routedDistanceKm,
         );
         ApiResponse.success(res, estimate, "Fare estimate calculated");
       } else {
         const estimates = await PricingService.calculateAllCategories(
           pickupLocation.coordinates,
           destinationLocation.coordinates,
+          routedDistanceKm,
         );
         ApiResponse.success(
           res,

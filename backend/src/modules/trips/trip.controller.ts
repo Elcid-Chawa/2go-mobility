@@ -5,6 +5,35 @@ import { ApiResponse } from "../../utils/apiResponse";
 import { AuthRequest } from "../../middlewares/auth";
 
 export class TripController {
+  static async getCustomerHistory(
+    req: AuthRequest,
+    res: Response,
+    next: NextFunction,
+  ): Promise<void> {
+    try {
+      const trips = await TripService.getCustomerTripHistory(req.userId!);
+      ApiResponse.success(res, trips, "Ride history retrieved");
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  static async getActiveTrip(
+    req: AuthRequest,
+    res: Response,
+    next: NextFunction,
+  ): Promise<void> {
+    try {
+      const trip = await TripService.getActiveTrip(
+        req.userId!,
+        req.userRole,
+      );
+      ApiResponse.success(res, trip, trip ? "Active ride retrieved" : "No active ride");
+    } catch (error) {
+      next(error);
+    }
+  }
+
   static async createTrip(
     req: AuthRequest,
     res: Response,

@@ -6,6 +6,8 @@ export interface IPricingRule extends Document {
   baseFare: number;
   pricePerKm: number;
   pricePerMinute: number;
+  longDistanceRate?: number;
+  longDistanceThresholdKm?: number;
   minimumFare: number;
   surgeMultiplier: number;
   isActive: boolean;
@@ -25,6 +27,8 @@ const PricingRuleSchema = new Schema<IPricingRule>(
     baseFare: { type: Number, required: true, default: 1000 },
     pricePerKm: { type: Number, required: true, default: 500 },
     pricePerMinute: { type: Number, required: true, default: 100 },
+    longDistanceRate: { type: Number, default: 500 },
+    longDistanceThresholdKm: { type: Number, default: 30 },
     minimumFare: { type: Number, required: true, default: 3000 },
     surgeMultiplier: { type: Number, required: true, default: 1.0 },
     isActive: { type: Boolean, default: true },

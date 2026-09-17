@@ -12,5 +12,6 @@ export const estimateFareSchema = z.object({
       address: z.string().optional(),
     }),
     category: z.nativeEnum(VehicleCategory).optional(),
+    routedDistanceKm: z.number().positive().max(2000).optional(),
   }),
 });
