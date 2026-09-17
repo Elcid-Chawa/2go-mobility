@@ -68,7 +68,11 @@ function AppContent() {
 
       <View style={styles.content}>
         {user.role === "CUSTOMER" ? (
-          <CustomerHomeScreen userName={user.name} />
+          <CustomerHomeScreen
+            user={user}
+            onUserUpdated={(updates) => setUser((current) => current ? { ...current, ...updates } : current)}
+            onSignOut={() => logout().then(() => setUser(null))}
+          />
         ) : (
           <DriverHomeScreen userName={user.name} />
         )}

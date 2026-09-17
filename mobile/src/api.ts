@@ -39,6 +39,8 @@ export interface FareEstimate {
   estimatedDurationMinutes: number;
   estimatedFare: number;
   currency: string;
+  fareType: "URBAN" | "INTERCITY";
+  pricingNotice?: string;
 }
 
 export interface MapCoordinate {
@@ -73,6 +75,11 @@ export interface Trip {
   category: VehicleCategory;
   estimatedFare: number;
   finalFare?: number;
+  waitingFare?: number;
+  paymentStatus?: "PENDING" | "PAID" | "FAILED" | "REFUNDED";
+  cancellationReason?: string;
+  createdAt?: string;
+  timestamps?: { requestedAt?: string; completedAt?: string; cancelledAt?: string };
   distanceKm: number;
   estimatedDurationMinutes: number;
   pickup: { address: string; location: { coordinates: [number, number] } };
@@ -175,6 +182,7 @@ export async function estimateFare(input: {
   pickup: { address: string; coordinates: [number, number] };
   destination: { address: string; coordinates: [number, number] };
   category: VehicleCategory;
+  routedDistanceKm?: number;
 }) {
   return request<FareEstimate>("/pricing/estimate", {
     method: "POST",
@@ -318,6 +326,7 @@ export async function createTrip(input: {
   destination: { address: string; coordinates: [number, number] };
   category: VehicleCategory;
   paymentMethod: PaymentMethod;
+  routedDistanceKm?: number;
 }) {
   const token = await getAccessToken();
   return request<Trip>(
@@ -358,6 +367,42 @@ export async function rateTrip(
 export async function getTrip(tripId: string) {
   const token = await getAccessToken();
   return request<Trip>(`/trips/${tripId}`, {}, token || undefined);
+}
+
+export interface CustomerProfile {
+  _id: string;
+  userId: AuthUser;
+  savedPlaces: Array<{
+    _id?: string;
+    name: string;
+    address: string;
+    location: { coordinates: [number, number] };
+  }>;
+  trustedContacts: Array<{ _id?: string; name: string; phone: string }>;
+}
+
+export async function getActiveTrip() {
+  const token = await getAccessToken();
+  return request<Trip | null>("/trips/active", {}, token || undefined);
+}
+
+export async function getTripHistory() {
+  const token = await getAccessToken();
+  return request<Trip[]>("/trips/history", {}, token || undefined);
+}
+
+export async function getCustomerProfile() {
+  const token = await getAccessToken();
+  return request<CustomerProfile>("/customers/me", {}, token || undefined);
+}
+
+export async function updateCustomerProfile(input: { name?: string; phone?: string }) {
+  const token = await getAccessToken();
+  return request<CustomerProfile>(
+    "/customers/me",
+    { method: "PATCH", body: JSON.stringify(input) },
+    token || undefined,
+  );
 }
 
 export async function driverStatus(input: {
@@ -407,6 +452,15 @@ export async function tripAction(
   return request<Trip | null>(
     `/trips/${tripId}/${action}`,
     { method: "POST" },
+    token || undefined,
+  );
+}
+
+export async function cancelTrip(tripId: string, reason: string) {
+  const token = await getAccessToken();
+  return request<Trip>(
+    `/trips/${tripId}/cancel`,
+    { method: "POST", body: JSON.stringify({ reason }) },
     token || undefined,
   );
 }

@@ -1,19 +1,23 @@
 import React, { useEffect, useState } from "react";
 import { PersonCard, RouteCard, ui } from "../design";
 import {
+  Alert,
   StyleSheet,
   Text,
   View,
   TouchableOpacity,
   ScrollView,
+  Vibration,
 } from "react-native";
 import MapView, { Marker, Polyline, UrlTile } from "react-native-maps";
 import * as Location from "expo-location";
 import {
   connectSocket,
+  cancelTrip,
   driverLocation,
   driverStatus,
   getDriverEarnings,
+  getActiveTrip,
   getDriverProfile,
   getTrip,
   getRoute,
@@ -107,11 +111,67 @@ export function DriverHomeScreen({ userName }: { userName: string }) {
     currency: string;
   } | null>(null);
 
+  function showTrip(trip: Trip, notify = false) {
+    setOfferId(trip._id);
+    setOfferTrip(trip);
+    setDriverState(
+      trip.status === "DRIVER_ASSIGNED"
+        ? "OFFER"
+        : trip.status === "DRIVER_ACCEPTED"
+          ? "ACCEPTED"
+          : trip.status === "DRIVER_ARRIVED"
+            ? "ARRIVED"
+            : trip.status === "TRIP_STARTED"
+              ? "IN_TRIP"
+              : trip.status === "TRIP_COMPLETED" || trip.status === "PAID"
+                ? "COMPLETED"
+                : "IDLE",
+    );
+    if (notify && trip.status === "DRIVER_ASSIGNED") {
+      Vibration.vibrate([0, 500, 250, 500]);
+      Alert.alert(
+        "New ride request",
+        `${trip.pickup.address}\nRWF ${Math.round(trip.estimatedFare).toLocaleString()}`,
+        [{ text: "View request" }],
+      );
+    }
+  }
+
+  function clearCurrentRide() {
+    setOfferId(null);
+    setOfferTrip(null);
+    setDriverState("IDLE");
+  }
+
+  function confirmDriverCancellation() {
+    if (!offerId) return;
+    Alert.alert(
+      "Cancel accepted ride?",
+      "Use this only when you cannot safely complete the pickup. The rider will be notified immediately.",
+      [
+        { text: "Keep ride", style: "cancel" },
+        {
+          text: "Cancel ride",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              await cancelTrip(offerId, "Driver unable to complete pickup");
+              clearCurrentRide();
+            } catch (cancelError) {
+              setError(cancelError instanceof Error ? cancelError.message : "Unable to cancel ride");
+            }
+          },
+        },
+      ],
+    );
+  }
+
   useEffect(() => {
-    Promise.all([getDriverProfile(), getDriverEarnings()])
-      .then(([profile, driverEarnings]) => {
+    Promise.all([getDriverProfile(), getDriverEarnings(), getActiveTrip()])
+      .then(([profile, driverEarnings, activeTrip]) => {
         setIsOnline(profile.onlineStatus === "ONLINE");
         setEarnings(driverEarnings);
+        if (activeTrip) showTrip(activeTrip);
       })
       .catch(() => setError("Unable to load driver profile"));
   }, []);
@@ -120,13 +180,32 @@ export function DriverHomeScreen({ userName }: { userName: string }) {
     let socket: Awaited<ReturnType<typeof connectSocket>>;
     connectSocket().then((connectedSocket) => {
       socket = connectedSocket;
+      socket?.on("connect", () => {
+        getActiveTrip().then((activeTrip) => {
+          if (activeTrip) showTrip(activeTrip);
+        }).catch(() => undefined);
+      });
       socket?.on("trip:offer", (offer: { tripId: string }) => {
-        setOfferId(offer.tripId);
-        setDriverState("OFFER");
         getTrip(offer.tripId)
-          .then(setOfferTrip)
+          .then((trip) => showTrip(trip, true))
           .catch(() => undefined);
         socket?.emit("trip:join", offer.tripId);
+      });
+      socket?.on("trip:offer_expired", ({ tripId }: { tripId: string }) => {
+        setOfferId((current) => {
+          if (current === tripId) {
+            setOfferTrip(null);
+            setDriverState("IDLE");
+            return null;
+          }
+          return current;
+        });
+      });
+      socket?.on("trip:cancelled", (event: { cancelledBy?: string }) => {
+        clearCurrentRide();
+        if (event.cancelledBy === "CUSTOMER") {
+          Alert.alert("Ride cancelled", "The rider cancelled this request. You are available for another ride.");
+        }
       });
     });
     return () => {
@@ -330,6 +409,9 @@ export function DriverHomeScreen({ userName }: { userName: string }) {
             >
               <Text style={styles.acceptBtnText}>Mark Arrived at Pickup</Text>
             </TouchableOpacity>
+            <TouchableOpacity style={styles.cancelRideButton} onPress={confirmDriverCancellation}>
+              <Text style={styles.cancelRideText}>Cancel accepted ride</Text>
+            </TouchableOpacity>
           </View>
         )}
 
@@ -350,6 +432,9 @@ export function DriverHomeScreen({ userName }: { userName: string }) {
               <Text style={styles.acceptBtnText}>
                 Start Trip to {offerTrip?.destination.address || "destination"}
               </Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.cancelRideButton} onPress={confirmDriverCancellation}>
+              <Text style={styles.cancelRideText}>Cancel before trip starts</Text>
             </TouchableOpacity>
           </View>
         )}
@@ -651,4 +736,6 @@ const styles = StyleSheet.create({
   cardTitle: { fontSize: 16, fontWeight: "bold", color: "#ffffff" },
   passengerText: { fontSize: 13, color: "#94a3b8", marginTop: 4 },
   error: { color: "#ff7b86", fontSize: 12, marginTop: 10, lineHeight: 17 },
+  cancelRideButton: { minHeight: 48, alignItems: "center", justifyContent: "center", marginTop: 8 },
+  cancelRideText: { color: "#ff8b91", fontSize: 13, fontWeight: "800" },
 });

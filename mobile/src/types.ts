@@ -19,4 +19,6 @@ export interface FareEstimate {
   estimatedDurationMinutes: number;
   estimatedFare: number;
   currency: string;
+  fareType: 'URBAN' | 'INTERCITY';
+  pricingNotice?: string;
 }

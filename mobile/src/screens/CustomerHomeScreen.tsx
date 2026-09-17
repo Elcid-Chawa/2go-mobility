@@ -1,6 +1,7 @@
 import { CarIcon, PersonCard, RouteCard, ui } from "../design";
 import React, { useEffect, useRef, useState } from "react";
 import {
+  Alert,
   StyleSheet,
   Text,
   View,
@@ -12,6 +13,7 @@ import MapView, { Marker, Polyline, UrlTile } from "react-native-maps";
 import * as Location from "expo-location";
 import {
   connectSocket,
+  cancelTrip,
   createTrip,
   estimateFare,
   FareEstimate,
@@ -21,6 +23,7 @@ import {
   MapCoordinate,
   NearbyDriver,
   getTrip,
+  getActiveTrip,
   Trip,
   VehicleCategory,
   LocationSuggestion,
@@ -28,6 +31,11 @@ import {
   rateTrip,
   reverseGeocode,
   searchLocationSuggestions,
+  AuthUser,
+  CustomerProfile,
+  getCustomerProfile,
+  getTripHistory,
+  updateCustomerProfile,
 } from "../api";
 
 const colors = {
@@ -132,7 +140,23 @@ function MapSurface({
   );
 }
 
-export function CustomerHomeScreen({ userName }: { userName: string }) {
+export function CustomerHomeScreen({
+  user,
+  onUserUpdated,
+  onSignOut,
+}: {
+  user: AuthUser;
+  onUserUpdated: (updates: Pick<AuthUser, "name" | "phone">) => void;
+  onSignOut: () => void;
+}) {
+  const userName = user.name;
+  const [activeTab, setActiveTab] = useState<"Rides" | "Activity" | "Profile">("Rides");
+  const [history, setHistory] = useState<Trip[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [profile, setProfile] = useState<CustomerProfile | null>(null);
+  const [profileName, setProfileName] = useState(user.name);
+  const [profilePhone, setProfilePhone] = useState(user.phone);
+  const [profileSaving, setProfileSaving] = useState(false);
   const [pickup, setPickup] = useState("Kyeshero, Goma");
   const [destination, setDestination] = useState("Katindo, Goma");
   const [category, setCategory] = useState<VehicleCategory>("STANDARD");
@@ -155,6 +179,7 @@ export function CustomerHomeScreen({ userName }: { userName: string }) {
     useState<MapCoordinate | null>(null);
   const [route, setRoute] = useState<MapCoordinate[]>([]);
   const [etaMinutes, setEtaMinutes] = useState<number | null>(null);
+  const [routedDistanceKm, setRoutedDistanceKm] = useState<number | null>(null);
   const [usingCurrentPickup, setUsingCurrentPickup] = useState(true);
   const [nearbyDrivers, setNearbyDrivers] = useState<NearbyDriver[]>([]);
   const [assignedDriverLocation, setAssignedDriverLocation] =
@@ -168,6 +193,56 @@ export function CustomerHomeScreen({ userName }: { userName: string }) {
   const [suggestions, setSuggestions] = useState<LocationSuggestion[]>([]);
   const [isFinishing, setIsFinishing] = useState(false);
 
+  async function loadHistory() {
+    setHistoryLoading(true);
+    try {
+      setHistory(await getTripHistory());
+    } catch (historyError) {
+      setError(historyError instanceof Error ? historyError.message : "Unable to load ride history");
+    } finally {
+      setHistoryLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    if (activeTab === "Activity") loadHistory();
+    if (activeTab === "Profile" && !profile) {
+      getCustomerProfile()
+        .then((value) => {
+          setProfile(value);
+          setProfileName(value.userId.name);
+          setProfilePhone(value.userId.phone);
+        })
+        .catch((profileError) => setError(profileError instanceof Error ? profileError.message : "Unable to load profile"));
+    }
+  }, [activeTab]);
+
+  async function saveProfile() {
+    setProfileSaving(true);
+    setError("");
+    try {
+      const updated = await updateCustomerProfile({ name: profileName, phone: profilePhone });
+      setProfile(updated);
+      onUserUpdated({ name: updated.userId.name, phone: updated.userId.phone });
+    } catch (profileError) {
+      setError(profileError instanceof Error ? profileError.message : "Unable to save profile");
+    } finally {
+      setProfileSaving(false);
+    }
+  }
+
+  function rideAgain(previousTrip: Trip) {
+    const [pickupLongitude, pickupLatitude] = previousTrip.pickup.location.coordinates;
+    const [destinationLongitude, destinationLatitude] = previousTrip.destination.location.coordinates;
+    setPickup(previousTrip.pickup.address);
+    setPickupLocation({ latitude: pickupLatitude, longitude: pickupLongitude });
+    setDestination(previousTrip.destination.address);
+    setDestinationLocation({ latitude: destinationLatitude, longitude: destinationLongitude });
+    setCategory(previousTrip.category);
+    setUsingCurrentPickup(false);
+    setActiveTab("Rides");
+  }
+
   function applyTrip(tripValue: Trip) {
     setTrip(tripValue);
     if (tripValue.status === "TRIP_STARTED") setTripState("ON_TRIP");
@@ -179,6 +254,45 @@ export function CustomerHomeScreen({ userName }: { userName: string }) {
       setTripState("COMPLETED");
     else if (tripValue.status !== "CANCELLED") setTripState("ASSIGNED");
   }
+
+  function resetCancelledTrip() {
+    setTripState("IDLE");
+    setTrip(null);
+    setAssignedDriverLocation(null);
+  }
+
+  function confirmCancelTrip() {
+    if (!trip?._id) return;
+    Alert.alert(
+      "Cancel this ride?",
+      trip.driverId
+        ? "Your driver may already be travelling to you."
+        : "We will stop searching for a driver.",
+      [
+        { text: "Keep ride", style: "cancel" },
+        {
+          text: "Cancel ride",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              await cancelTrip(trip._id, "Cancelled by rider");
+              resetCancelledTrip();
+            } catch (cancelError) {
+              setError(cancelError instanceof Error ? cancelError.message : "Unable to cancel ride");
+            }
+          },
+        },
+      ],
+    );
+  }
+
+  useEffect(() => {
+    getActiveTrip()
+      .then((activeTrip) => {
+        if (activeTrip) applyTrip(activeTrip);
+      })
+      .catch(() => undefined);
+  }, []);
 
   useEffect(() => {
     if (!pickupLocation) return;
@@ -274,10 +388,12 @@ export function CustomerHomeScreen({ userName }: { userName: string }) {
       .then((result) => {
         setRoute(result.coordinates);
         setEtaMinutes(result.durationMinutes);
+        setRoutedDistanceKm(result.distanceKm);
       })
       .catch(() => {
         setRoute([]);
         setEtaMinutes(null);
+        setRoutedDistanceKm(null);
       });
   }, [pickupLocation, destinationLocation]);
 
@@ -339,12 +455,12 @@ export function CustomerHomeScreen({ userName }: { userName: string }) {
       return;
     }
     for (const rideCategory of ["STANDARD", "COMFORT", "PREMIUM", "XL"] as const) {
-      estimateFare({ ...coordinates, category: rideCategory })
+      estimateFare({ ...coordinates, category: rideCategory, routedDistanceKm: routedDistanceKm || undefined })
         .then(value => { if (active) setEstimates(previous => ({ ...previous, [rideCategory]: value })); })
         .catch((requestError) => { if (active) setError(requestError.message); });
     }
     return () => { active = false; };
-  }, [pickup, destination, pickupLocation, destinationLocation]);
+  }, [pickup, destination, pickupLocation, destinationLocation, routedDistanceKm]);
 
   useEffect(() => {
     if (
@@ -372,6 +488,12 @@ export function CustomerHomeScreen({ userName }: { userName: string }) {
       socket?.on("trip:assigned", () => setTripState("ASSIGNED"));
       socket?.on("trip:started", () => setTripState("ON_TRIP"));
       socket?.on("trip:completed", () => setTripState("COMPLETED"));
+      socket?.on("trip:cancelled", (event: { cancelledBy?: string }) => {
+        resetCancelledTrip();
+        if (event.cancelledBy === "DRIVER") {
+          Alert.alert("Ride cancelled", "The driver cancelled before pickup. You can request another ride.");
+        }
+      });
       socket?.on(
         "trip:location_updated",
         (update: { tripId: string; coordinates: [number, number] }) => {
@@ -398,6 +520,7 @@ export function CustomerHomeScreen({ userName }: { userName: string }) {
         ...coordinates,
         category,
         paymentMethod,
+        routedDistanceKm: routedDistanceKm || undefined,
       });
       applyTrip(created);
     } catch (requestError) {
@@ -469,6 +592,7 @@ export function CustomerHomeScreen({ userName }: { userName: string }) {
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
+        {activeTab === "Rides" && <>
         {tripState === "IDLE" && <View style={{position: "absolute", top: 12, left: 16, right: 16, zIndex: 5}}>
             <View style={styles.searchBox}>
               <View style={styles.searchRail}>
@@ -604,6 +728,14 @@ export function CustomerHomeScreen({ userName }: { userName: string }) {
               </View>
               <Text style={styles.comingSoon}>COMING SOON</Text>
             </View>
+            {estimate?.pricingNotice && (
+              <View style={styles.pricingNotice}>
+                <Text style={styles.pricingNoticeTitle}>
+                  {estimate.fareType === "INTERCITY" ? "INTERCITY ESTIMATE" : "RWANDA METERED FARE"}
+                </Text>
+                <Text style={styles.pricingNoticeText}>{estimate.pricingNotice}</Text>
+              </View>
+            )}
             <TouchableOpacity
               style={styles.primaryButton}
               onPress={requestTrip}
@@ -646,6 +778,9 @@ export function CustomerHomeScreen({ userName }: { userName: string }) {
               }
             >
               <Text style={styles.primaryButtonText}>Refresh trip status</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.cancelRideButton} onPress={confirmCancelTrip}>
+              <Text style={styles.cancelRideText}>Cancel ride</Text>
             </TouchableOpacity>
           </View>
         )}
@@ -709,30 +844,98 @@ export function CustomerHomeScreen({ userName }: { userName: string }) {
             {!!error && <Text style={styles.error}>{error}</Text>}
           </View>
         )}
+        </>}
+
+        {activeTab === "Activity" && (
+          <View style={styles.tabPage}>
+            <Text style={styles.tabEyebrow}>YOUR RIDES</Text>
+            <Text style={styles.tabTitle}>Activity</Text>
+            <Text style={styles.tabSubtitle}>Recent requests, completed journeys and cancellations.</Text>
+            {historyLoading && <Text style={styles.emptyText}>Loading your rides...</Text>}
+            {!historyLoading && history.length === 0 && (
+              <View style={styles.emptyCard}>
+                <Text style={styles.emptyIcon}>↗</Text>
+                <Text style={styles.emptyTitle}>No rides yet</Text>
+                <Text style={styles.emptyText}>Your completed and cancelled rides will appear here.</Text>
+                <TouchableOpacity style={styles.primaryButton} onPress={() => setActiveTab("Rides")}>
+                  <Text style={styles.primaryButtonText}>Request your first ride</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+            {history.map((historyTrip) => (
+              <View key={historyTrip._id} style={styles.historyCard}>
+                <View style={styles.historyHeader}>
+                  <View>
+                    <Text style={styles.historyDate}>{new Date(historyTrip.timestamps?.requestedAt || historyTrip.createdAt || Date.now()).toLocaleDateString()}</Text>
+                    <Text style={styles.historyCategory}>2Go {historyTrip.category.toLowerCase()}</Text>
+                  </View>
+                  <View style={[styles.statusPill, historyTrip.status === "CANCELLED" && styles.statusPillCancelled]}>
+                    <Text style={[styles.statusPillText, historyTrip.status === "CANCELLED" && styles.statusPillTextCancelled]}>{historyTrip.status.replaceAll("_", " ")}</Text>
+                  </View>
+                </View>
+                <RouteCard pickup={historyTrip.pickup.address} destination={historyTrip.destination.address} />
+                <View style={styles.historyFooter}>
+                  <Text style={styles.historyDriver}>{historyTrip.driverId?.userId?.name || "No driver assigned"}</Text>
+                  <Text style={styles.historyFare}>RWF {Math.round(historyTrip.finalFare ?? historyTrip.estimatedFare).toLocaleString()}</Text>
+                </View>
+                {historyTrip.cancellationReason && <Text style={styles.cancellationReason}>{historyTrip.cancellationReason}</Text>}
+                <TouchableOpacity style={styles.rideAgainButton} onPress={() => rideAgain(historyTrip)}>
+                  <Text style={styles.rideAgainText}>Ride this route again</Text>
+                </TouchableOpacity>
+              </View>
+            ))}
+          </View>
+        )}
+
+        {activeTab === "Profile" && (
+          <View style={styles.tabPage}>
+            <Text style={styles.tabEyebrow}>YOUR ACCOUNT</Text>
+            <Text style={styles.tabTitle}>Profile</Text>
+            <View style={styles.profileHero}>
+              <View style={styles.profileAvatar}><Text style={styles.profileAvatarText}>{profileName.slice(0, 1).toUpperCase()}</Text></View>
+              <View style={{ flex: 1 }}><Text style={styles.profileHeroName}>{profileName}</Text><Text style={styles.profileEmail}>{user.email}</Text></View>
+            </View>
+            <View style={styles.profileCard}>
+              <Text style={styles.inputLabel}>FULL NAME</Text>
+              <TextInput value={profileName} onChangeText={setProfileName} style={styles.profileInput} placeholderTextColor={colors.muted} />
+              <Text style={styles.inputLabel}>PHONE NUMBER</Text>
+              <TextInput value={profilePhone} onChangeText={setProfilePhone} style={styles.profileInput} keyboardType="phone-pad" placeholderTextColor={colors.muted} />
+              <Text style={styles.inputLabel}>EMAIL</Text>
+              <View style={[styles.profileInput, styles.readOnlyInput]}><Text style={styles.readOnlyText}>{user.email}</Text></View>
+              <TouchableOpacity style={styles.primaryButton} onPress={saveProfile} disabled={profileSaving}>
+                <Text style={styles.primaryButtonText}>{profileSaving ? "Saving..." : "Save profile"}</Text>
+              </TouchableOpacity>
+            </View>
+            <View style={styles.profileCard}>
+              <Text style={styles.profileSectionTitle}>Saved places</Text>
+              {profile?.savedPlaces?.length ? profile.savedPlaces.map((place, index) => (
+                <View key={place._id || `${place.name}-${index}`} style={styles.savedPlaceRow}>
+                  <Text style={styles.savedPlaceIcon}>⌂</Text>
+                  <View style={{ flex: 1 }}><Text style={styles.savedPlaceName}>{place.name}</Text><Text style={styles.savedPlaceAddress}>{place.address}</Text></View>
+                </View>
+              )) : <Text style={styles.emptyText}>No saved places yet.</Text>}
+            </View>
+            {!!error && <Text style={styles.error}>{error}</Text>}
+            <TouchableOpacity style={styles.signOutButton} onPress={onSignOut}><Text style={styles.signOutText}>Sign out</Text></TouchableOpacity>
+          </View>
+        )}
       </ScrollView>
       <View style={styles.bottomNav}>
-        <NavItem icon="◎" label="Rides" active />
-        <NavItem icon="◷" label="Activity" />
-        <NavItem icon="$" label="Wallet" />
-        <NavItem icon="○" label="Profile" />
+        {(["Rides", "Activity", "Profile"] as const).map((tab) => (
+          <TouchableOpacity
+            key={tab}
+            accessibilityRole="tab"
+            accessibilityState={{ selected: activeTab === tab }}
+            onPress={() => setActiveTab(tab)}
+            style={styles.navItem}
+          >
+            <Text style={[styles.navIcon, activeTab === tab && styles.navActive]}>
+              {tab === "Rides" ? "◎" : tab === "Activity" ? "↗" : "○"}
+            </Text>
+            <Text style={[styles.navLabel, activeTab === tab && styles.navActive]}>{tab}</Text>
+          </TouchableOpacity>
+        ))}
       </View>
-    </View>
-  );
-}
-
-function NavItem({
-  icon,
-  label,
-  active = false,
-}: {
-  icon: string;
-  label: string;
-  active?: boolean;
-}) {
-  return (
-    <View style={styles.navItem}>
-      <Text style={[styles.navIcon, active && styles.navActive]}>{icon}</Text>
-      <Text style={[styles.navLabel, active && styles.navActive]}>{label}</Text>
     </View>
   );
 }
@@ -869,6 +1072,18 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
   },
   nearbyLabel: { color: "#9ee9db", fontSize: 10, fontWeight: "800" },
+  pricingNotice: {
+    backgroundColor: "#12282a",
+    borderColor: "#25565a",
+    borderWidth: 1,
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: 12,
+  },
+  pricingNoticeTitle: { color: "#39e6b0", fontSize: 10, fontWeight: "900", letterSpacing: 1 },
+  pricingNoticeText: { color: "#b6c9cb", fontSize: 11, lineHeight: 16, marginTop: 4 },
+  cancelRideButton: { minHeight: 48, alignItems: "center", justifyContent: "center", marginTop: 10 },
+  cancelRideText: { color: "#ff8b91", fontSize: 13, fontWeight: "800" },
   sheetTitle: {
     color: colors.ink,
     fontSize: 20,
@@ -1055,6 +1270,45 @@ const styles = StyleSheet.create({
   },
   ratingRow: { flexDirection: "row", justifyContent: "center", gap: 14, marginVertical: 18 },
   star: { color: "#ffc857", fontSize: 38 },
+  tabPage: { padding: 20, paddingTop: 28, minHeight: 680 },
+  tabEyebrow: { color: colors.blue, fontSize: 10, fontWeight: "900", letterSpacing: 1.4 },
+  tabTitle: { color: colors.ink, fontSize: 30, fontWeight: "900", marginTop: 5 },
+  tabSubtitle: { color: colors.muted, fontSize: 13, lineHeight: 19, marginTop: 5, marginBottom: 20 },
+  emptyCard: { backgroundColor: colors.panel, borderColor: colors.line, borderWidth: 1, borderRadius: 18, padding: 24, alignItems: "center", gap: 8 },
+  emptyIcon: { color: colors.blue, fontSize: 34 },
+  emptyTitle: { color: colors.ink, fontSize: 19, fontWeight: "800" },
+  emptyText: { color: colors.muted, fontSize: 12, lineHeight: 18, textAlign: "center", marginVertical: 12 },
+  historyCard: { backgroundColor: colors.panel, borderColor: colors.line, borderWidth: 1, borderRadius: 18, padding: 16, marginBottom: 14 },
+  historyHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 },
+  historyDate: { color: colors.ink, fontSize: 14, fontWeight: "800" },
+  historyCategory: { color: colors.muted, fontSize: 11, marginTop: 3, textTransform: "capitalize" },
+  statusPill: { backgroundColor: "#123b35", borderRadius: 20, paddingHorizontal: 9, paddingVertical: 5 },
+  statusPillCancelled: { backgroundColor: "#40252a" },
+  statusPillText: { color: "#39e6b0", fontSize: 9, fontWeight: "900" },
+  statusPillTextCancelled: { color: "#ff8b91" },
+  historyFooter: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 12 },
+  historyDriver: { color: colors.muted, fontSize: 12, flex: 1 },
+  historyFare: { color: colors.ink, fontSize: 15, fontWeight: "900" },
+  cancellationReason: { color: "#ff9da3", fontSize: 11, marginTop: 10 },
+  rideAgainButton: { minHeight: 42, borderColor: "#25565a", borderWidth: 1, borderRadius: 10, alignItems: "center", justifyContent: "center", marginTop: 14 },
+  rideAgainText: { color: colors.blue, fontSize: 12, fontWeight: "800" },
+  profileHero: { flexDirection: "row", alignItems: "center", gap: 14, backgroundColor: colors.panel, borderRadius: 18, padding: 18, marginVertical: 18, borderColor: colors.line, borderWidth: 1 },
+  profileAvatar: { width: 58, height: 58, borderRadius: 29, backgroundColor: "#19424a", alignItems: "center", justifyContent: "center" },
+  profileAvatarText: { color: colors.blue, fontSize: 25, fontWeight: "900" },
+  profileHeroName: { color: colors.ink, fontSize: 19, fontWeight: "900" },
+  profileEmail: { color: colors.muted, fontSize: 12, marginTop: 3 },
+  profileCard: { backgroundColor: colors.panel, borderRadius: 18, padding: 18, marginBottom: 14, borderColor: colors.line, borderWidth: 1 },
+  profileSectionTitle: { color: colors.ink, fontSize: 16, fontWeight: "800", marginBottom: 10 },
+  inputLabel: { color: colors.muted, fontSize: 9, fontWeight: "900", letterSpacing: 1, marginTop: 10, marginBottom: 6 },
+  profileInput: { minHeight: 50, backgroundColor: "#10171b", borderColor: colors.line, borderWidth: 1, borderRadius: 10, paddingHorizontal: 13, color: colors.ink, fontSize: 14, justifyContent: "center" },
+  readOnlyInput: { opacity: 0.7 },
+  readOnlyText: { color: colors.muted, fontSize: 14 },
+  savedPlaceRow: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 12, borderBottomColor: colors.line, borderBottomWidth: 1 },
+  savedPlaceIcon: { color: colors.blue, fontSize: 23 },
+  savedPlaceName: { color: colors.ink, fontSize: 14, fontWeight: "800" },
+  savedPlaceAddress: { color: colors.muted, fontSize: 11, lineHeight: 16, marginTop: 2 },
+  signOutButton: { minHeight: 52, borderColor: "#65383e", borderWidth: 1, borderRadius: 12, alignItems: "center", justifyContent: "center", marginBottom: 20 },
+  signOutText: { color: "#ff8b91", fontSize: 14, fontWeight: "900" },
   bottomNav: {
     position: "absolute",
     bottom: 0,
