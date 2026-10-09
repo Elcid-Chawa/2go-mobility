@@ -38,3 +38,6 @@ Thumbs.db
 
 # Docker / Mongo data
 mongo-data/
+
+AGENTS.md
+CLAUDE.md

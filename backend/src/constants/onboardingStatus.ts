@@ -1,0 +1,13 @@
+export enum DriverOnboardingStatus {
+  NOT_STARTED = "NOT_STARTED",
+  IN_PROGRESS = "IN_PROGRESS",
+  COMPLETED = "COMPLETED",
+  REJECTED = "REJECTED",
+}
+
+export enum DriverVerificationStatus {
+    NOT_VERIFIED = "NOT_VERIFIED",
+    VERIFICATION_IN_PROGRESS = "VERIFICATION_IN_PROGRESS",
+    VERIFIED = "VERIFIED",
+    REJECTED = "REJECTED",
+}

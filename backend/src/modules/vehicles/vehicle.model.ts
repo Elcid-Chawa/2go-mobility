@@ -5,12 +5,20 @@ export interface IVehicle {
   _id: mongoose.Types.ObjectId;
   driverId?: mongoose.Types.ObjectId;
   registrationNumber: string;
-  make: string;
-  model: string;
-  year: number;
-  color: string;
+  vin?: string;
+  make?: string;
+  model?: string;
+  year?: number;
+  color?: string;
   category: VehicleCategory;
   status: VehicleStatus;
+  ownershipType?: string;
+  leasingContactId?: mongoose.Types.ObjectId;
+  telematics?: {
+    odometerKm?: number;
+    fuelLevel?: number;
+    lastUpdate?: Date;
+  };
   createdAt: Date;
   updatedAt: Date;
 }
@@ -28,6 +36,7 @@ const VehicleSchema = new Schema<IVehicle>(
       unique: true,
       trim: true,
     },
+    vin: { type: String, required: true, unique: true, trim: true },
     make: { type: String, required: true },
     model: { type: String, required: true },
     year: { type: Number, required: true },
@@ -43,6 +52,17 @@ const VehicleSchema = new Schema<IVehicle>(
       enum: Object.values(VehicleStatus),
       default: VehicleStatus.ACTIVE,
       index: true,
+    },
+    ownershipType: { type: String },
+    leasingContactId: {
+      type: Schema.Types.ObjectId,
+      ref: 'LeasingContact',
+      index: true,
+    },
+    telematics: {
+      odometerKm: { type: Number },
+      fuelLevel: { type: Number },
+      lastUpdate: { type: Date },
     },
   },
   {

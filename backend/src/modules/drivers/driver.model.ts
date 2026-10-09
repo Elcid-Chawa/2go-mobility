@@ -8,12 +8,17 @@ import {
 export interface IDriver extends Document {
   userId: mongoose.Types.ObjectId;
   licenseNumber: string;
+  licenseExpiryDate?: Date;
   approvalStatus: DriverApprovalStatus;
   onlineStatus: DriverOnlineStatus;
   availabilityStatus: DriverAvailabilityStatus;
   currentLocation: {
     type: 'Point';
     coordinates: [number, number]; // [lng, lat]
+  };
+  performanceMetrics?: {
+    cancellationRate: number;
+    acceptanceRate: number;
   };
   currentHeading?: number;
   rating: number;
@@ -38,6 +43,9 @@ const DriverSchema = new Schema<IDriver>(
       type: String,
       required: true,
       trim: true,
+    },
+    licenseExpiryDate: {
+      type: Date,
     },
     approvalStatus: {
       type: String,
@@ -66,6 +74,16 @@ const DriverSchema = new Schema<IDriver>(
       coordinates: {
         type: [Number], // [lng, lat]
         default: [0, 0],
+      },
+    },
+    performanceMetrics: {
+      cancellationRate: {
+        type: Number,
+        default: 0.0,
+      },
+      acceptanceRate: {
+        type: Number,
+        default: 100.0,
       },
     },
     currentHeading: {

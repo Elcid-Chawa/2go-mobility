@@ -24,4 +24,21 @@ export class ApiResponse {
       ...(errors ? { errors } : {}),
     });
   }
+
+  // TODO: Add update response method if needed in the future
+  static updated<T>(res: Response, data: T, message = 'Resource updated successfully'): Response {
+    return res.status(200).json({
+      success: true,
+      message,
+      data,
+    });
+  }
+
+  //TODO: Add delete response method if needed in the future
+  static deleted(res: Response, message = 'Resource deleted successfully'): Response {
+    return res.status(200).json({
+      success: true,
+      message,
+    });
+  }
 }

@@ -94,7 +94,9 @@ export class DispatchService {
           });
           if (stillSearching) await this.dispatchTrip(tripId, io);
         } catch (error) {
-          logger.error(`Unable to retry dispatch for trip ${trip._id}`, { error });
+          logger.error(`Unable to retry dispatch for trip ${trip._id}`, {
+            error,
+          });
         }
       }, 5000);
       retryTimer.unref?.();
@@ -135,26 +137,31 @@ export class DispatchService {
       });
     }
     const expiryTimer = setTimeout(async () => {
-      const expired = await Trip.findOneAndUpdate(
-        {
-          _id: trip._id,
-          driverId: candidate._id,
-          status: TripStatus.DRIVER_ASSIGNED,
-        },
-        {
-          $set: { status: TripStatus.SEARCHING_DRIVER, driverId: null },
-          $addToSet: { rejectedDriverIds: candidate._id },
-        },
-        { new: true },
-      );
-      if (expired) {
-        candidate.availabilityStatus = DriverAvailabilityStatus.AVAILABLE;
-        await candidate.save();
-        if (io)
-          io.to(`trip:${trip._id}`).emit("trip:offer_expired", {
-            tripId: trip._id,
-          });
-        await this.dispatchTrip(tripId, io);
+      try {
+        if (mongoose.connection.readyState !== 1) return;
+        const expired = await Trip.findOneAndUpdate(
+          {
+            _id: trip._id,
+            driverId: candidate._id,
+            status: TripStatus.DRIVER_ASSIGNED,
+          },
+          {
+            $set: { status: TripStatus.SEARCHING_DRIVER, driverId: null },
+            $addToSet: { rejectedDriverIds: candidate._id },
+          },
+          { new: true },
+        );
+        if (expired) {
+          candidate.availabilityStatus = DriverAvailabilityStatus.AVAILABLE;
+          await candidate.save();
+          if (io)
+            io.to(`trip:${trip._id}`).emit("trip:offer_expired", {
+              tripId: trip._id,
+            });
+          await this.dispatchTrip(tripId, io);
+        }
+      } catch {
+        // Connection closed or already handled
       }
     }, env.DISPATCH_OFFER_TIMEOUT_SECONDS * 1000);
     expiryTimer.unref?.();

@@ -26,6 +26,20 @@ export interface ITrip extends Document {
   status: TripStatus;
   paymentStatus: PaymentStatus;
   paymentMethod: PaymentMethod;
+  fare: {
+    baseFare: number;
+    distanceFare: number;
+    timeFare: number;
+    discount: number;
+    waitingFare: number;
+    totalAmount: number;
+    currency: string; // USD | EUR | RWF | etc.
+  }
+  payment?: {
+    transactionId?: mongoose.Types.ObjectId;
+    method?: PaymentMethod;
+    status?: PaymentStatus;
+  };
   cancellationReason?: string;
   cancelledBy?: mongoose.Types.ObjectId;
   timestamps: {
@@ -38,6 +52,10 @@ export interface ITrip extends Document {
     paidAt?: Date;
     cancelledAt?: Date;
   };
+  ratings?: {
+    customerRating?: number;
+    customerComment?: string;
+  }
   createdAt: Date;
   updatedAt: Date;
 }
@@ -149,6 +167,10 @@ const TripSchema = new Schema<ITrip>(
       completedAt: { type: Date },
       paidAt: { type: Date },
       cancelledAt: { type: Date },
+    },
+    ratings: {
+      customerRating: { type: Number, min: 1, max: 5 },
+      customerComment: { type: String },
     },
   },
   {

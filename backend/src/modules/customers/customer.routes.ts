@@ -11,4 +11,9 @@ router.get('/me', requireRoles(UserRole.CUSTOMER, UserRole.ADMIN), CustomerContr
 router.patch('/me', requireRoles(UserRole.CUSTOMER, UserRole.ADMIN), CustomerController.updateProfile);
 router.post('/me/places', requireRoles(UserRole.CUSTOMER, UserRole.ADMIN), CustomerController.addSavedPlace);
 
+// Customer custom routes
+
+// Trigger SOS alert
+router.post('/customer/trips/:tripId/sos', requireRoles(UserRole.CUSTOMER), CustomerController.triggerSosAlert);
+
 export default router;

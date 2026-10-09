@@ -3,10 +3,13 @@ export enum UserRole {
   DRIVER = 'DRIVER',
   OPERATIONS = 'OPERATIONS',
   ADMIN = 'ADMIN',
+  SYSTEM_OWNER = 'SYSTEM_OWNER',
+  AGENT = 'AGENT',
 }
 
 export enum UserStatus {
   ACTIVE = 'ACTIVE',
   SUSPENDED = 'SUSPENDED',
   INACTIVE = 'INACTIVE',
+  BLOCKED = 'BLOCKED',
 }
