@@ -69,6 +69,9 @@ export class AuthService {
     const passwordHash = await bcrypt.hash(dto.password, salt);
 
     const userRole = dto.role || UserRole.CUSTOMER;
+    if (userRole !== UserRole.CUSTOMER && userRole !== UserRole.DRIVER) {
+      throw { statusCode: 403, message: "Operational accounts must be created by an administrator." };
+    }
 
     const user = new User({
       name: dto.name,
@@ -92,6 +95,7 @@ export class AuthService {
       const driver = await Driver.create({
         userId: user._id,
         licenseNumber: dto.licenseNumber || `LIC-${Date.now()}`,
+        approvalStatus: "PENDING",
       });
       profileId = driver._id.toString();
     }
