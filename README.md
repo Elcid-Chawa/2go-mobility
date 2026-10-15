@@ -14,6 +14,15 @@ Authoritative, full-stack ride-hailing vertical slice uniting Customer, Driver, 
 - **Mobile Apps**: React Native + Expo (unified Customer & Driver interface)
 - **Infrastructure**: Docker, Docker Compose, Nginx reverse proxy
 
+### Domain Services
+
+The existing `backend/` remains the ride-share service and authentication
+authority. Independent Node.js/TypeScript service scaffolds are available for
+Movers, Shopping, Car Rentals, and Delivery under [`services/`](services/README.md).
+Each currently has its own process, Docker image, and MongoDB database name.
+Service APIs are routed through Nginx under `/api/v1/{service}`. See the
+[domain services guide](services/README.md) for local and Docker instructions.
+
 ---
 
 ## 🚀 Quick Start & Development
@@ -41,8 +50,15 @@ npm run dev       # Start Next.js Operations Console on http://localhost:3000
 ```bash
 cd mobile
 npm install
-npm start         # Launch Expo dev server (Customer & Driver views)
+npx expo run:android   # Build/install the native development client (first run or after native dependency changes)
+npx expo start --dev-client --clear
 ```
+
+The mobile project uses native Expo modules and a custom development client.
+Rebuild and reinstall that client whenever native dependencies or app plugins
+change; a JavaScript reload cannot add native modules to an already-installed
+app. For iOS, run `npx expo run:ios` on macOS, or create/install the EAS
+development build with `eas build --profile development --platform ios`.
 
 ---
 
@@ -65,6 +81,43 @@ npm test
 7. **Completion & Settlement**: Final fare calculated, cash payment recorded (duplicate payment prevented).
 8. **Feedback**: Customer submits 1-5 star rating; driver score updated.
 9. **Operations Oversight**: Admin monitors active metrics, completed trips, and revenue KPIs.
+
+## Driver onboarding and Operations access
+
+Public registration supports customer and driver accounts only. A newly
+registered driver remains pending and cannot go online or receive dispatch
+offers until Operations reviews and approves the application and an active
+vehicle is assigned.
+
+The mobile driver onboarding flow collects identity and contact details,
+address, driving-licence information, and vehicle details. Drivers must upload
+a profile photo, vehicle photo, identity document, driving licence, and vehicle
+registration/vignette; insurance is optional. Drivers can save a draft, submit
+it for review, and correct and resubmit a rejected application. Uploaded files
+are private: authenticated, authorized requests are required to view them.
+
+Operations permissions are enforced by the backend, not just hidden in the
+web UI:
+
+| Role | Default access |
+| --- | --- |
+| `SYSTEM_OWNER`, `ADMIN` | All operations |
+| `OPERATIONS` | View operations, verify drivers, dispatch, manage fleet and users |
+| `DISPATCHER` | View operations and dispatch |
+| `AGENT`, `VIEWER` | Read-only operations |
+| `CUSTOMER`, `DRIVER` | No Operations permissions |
+
+An authorized administrator can manage accounts and fleet records in the
+Operations console. Grant staff roles only to trusted team members; the public
+registration endpoint rejects staff and administrator roles. The console
+provides the onboarding review queue, dashboard, users, drivers, vehicles,
+dispatch, and trip views according to the signed-in user's permissions.
+
+Uploads use local disk storage by default (`UPLOAD_DIR`, defaulting to
+`backend/uploads`). Docker Compose sets this to `/app/uploads` and persists it
+in the named `driver-uploads` volume. Back up this volume with the database;
+for multi-instance production deployments, use shared persistent object storage
+instead of instance-local storage.
 
 ---
 
