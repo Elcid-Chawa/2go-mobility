@@ -1,144 +1,71 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import Link from "next/link";
-import {
-  Car,
-  Star,
-  CheckCircle,
-  Shield,
-  Phone,
-  Mail,
-  UserCheck,
-  ArrowRight,
-} from "lucide-react";
+import { RefreshCw, UserPlus, UserCheck } from "lucide-react";
+import { apiRequest } from "../../lib/api";
+import { Permission } from "../../lib/types";
+import { PermissionGate } from "../../components/PermissionGate";
+
+interface DriverRecord {
+  _id: string;
+  userId?: { _id?: string; name?: string; email?: string; phone?: string; status?: string };
+  licenseNumber?: string;
+  approvalStatus: string;
+  onlineStatus: string;
+  availabilityStatus: string;
+  rating: number;
+  totalTrips: number;
+  activeVehicleId?: { make?: string; model?: string; registrationNumber?: string; category?: string; status?: string };
+}
 
 export default function DriversPage() {
-  const [drivers] = useState([
-    {
-      id: "DRV-1029",
-      name: "Bob Chauffeur",
-      phone: "+250788000333",
-      email: "bob.driver@2go.rw",
-      license: "DL-RW-102938",
-      vehicle: "2023 Toyota Camry Hybrid (RAD 892 B)",
-      category: "STANDARD",
-      onlineStatus: "ONLINE",
-      availability: "AVAILABLE",
-      rating: 4.95,
-      totalTrips: 143,
-      totalEarnings: "428,000 RWF",
-    },
-    {
-      id: "DRV-1030",
-      name: "Jean Paul Habimana",
-      phone: "+250788334455",
-      email: "jeanpaul.h@2go.rw",
-      license: "DL-RW-110293",
-      vehicle: "2021 Volkswagen Passat (RAC 102 M)",
-      category: "PREMIUM",
-      onlineStatus: "ONLINE",
-      availability: "AVAILABLE",
-      rating: 5.0,
-      totalTrips: 68,
-      totalEarnings: "215,400 RWF",
-    },
-  ]);
+  const [drivers, setDrivers] = useState<DriverRecord[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  async function load() {
+    setError("");
+    try {
+      setDrivers(await apiRequest<DriverRecord[]>("/admin/drivers"));
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Unable to load drivers.");
+    } finally {
+      setLoading(false);
+    }
+  }
+  useEffect(() => { void load(); }, []);
 
   return (
-    <div className="space-y-6 max-w-7xl mx-auto">
-      {/* Header and Quick Navigation */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <h2 className="text-2xl font-bold text-white tracking-tight">
-            Driver & Fleet Management
-          </h2>
-          <p className="text-sm text-slate-400 mt-1">
-            Active verified drivers, vehicle telematics, and operational
-            availability status.
-          </p>
-        </div>
-
-        <Link
-          href="/onboarding"
-          className="px-4 py-2.5 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-slate-950 font-bold text-xs rounded-xl transition shadow-lg flex items-center gap-2 self-start md:self-auto"
-        >
-          <UserCheck className="w-4 h-4" />
-          <span>Driver Onboarding Queue (2 Pending)</span>
-          <ArrowRight className="w-3.5 h-3.5" />
-        </Link>
-      </div>
-
-      {/* Grid of Verified Active Drivers */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {drivers.map((driver) => (
-          <div
-            key={driver.id}
-            className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-4 shadow-lg"
-          >
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="w-12 h-12 rounded-xl bg-slate-800 border border-slate-700 flex items-center justify-center font-bold text-emerald-400 text-lg">
-                  {driver.name.substring(0, 2).toUpperCase()}
-                </div>
-                <div>
-                  <h3 className="font-bold text-white text-base">
-                    {driver.name}
-                  </h3>
-                  <p className="text-xs text-slate-400">
-                    {driver.id} • {driver.license}
-                  </p>
-                </div>
-              </div>
-              <span className="px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
-                {driver.onlineStatus}
-              </span>
-            </div>
-
-            <div className="p-3 bg-slate-950/60 rounded-xl border border-slate-800 text-xs space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-slate-400">Assigned Vehicle:</span>
-                <span className="font-medium text-slate-200">
-                  {driver.vehicle}
-                </span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-slate-400">Category:</span>
-                <span className="font-semibold text-emerald-400">
-                  {driver.category}
-                </span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-slate-400">Availability:</span>
-                <span className="font-medium text-cyan-400">
-                  {driver.availability}
-                </span>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-3 gap-2 pt-2 text-center text-xs">
-              <div className="p-2 bg-slate-950/40 rounded-lg border border-slate-800">
-                <div className="font-bold text-amber-400">
-                  ⭐ {driver.rating}
-                </div>
-                <div className="text-[10px] text-slate-500">Rating</div>
-              </div>
-              <div className="p-2 bg-slate-950/40 rounded-lg border border-slate-800">
-                <div className="font-bold text-slate-200">
-                  {driver.totalTrips}
-                </div>
-                <div className="text-[10px] text-slate-500">Trips</div>
-              </div>
-              <div className="p-2 bg-slate-950/40 rounded-lg border border-slate-800">
-                <div className="font-bold text-emerald-400">
-                  {driver.totalEarnings}
-                </div>
-                <div className="text-[10px] text-slate-500">Earnings</div>
-              </div>
-            </div>
+    <PermissionGate permission={Permission.VIEW_OPERATIONS}>
+      <div className="mx-auto max-w-7xl space-y-6">
+        <header className="flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <h1 className="text-2xl font-bold text-white">Driver management</h1>
+            <p className="mt-1 text-sm text-slate-400">Driver status and assigned vehicle data from the backend.</p>
           </div>
-        ))}
+          <div className="flex gap-2">
+            <Link href="/users" className="inline-flex items-center gap-2 rounded-lg bg-cyan-500 px-3 py-2 text-sm font-semibold text-slate-950"><UserPlus className="h-4 w-4" />Add driver</Link>
+            <Link href="/onboarding" className="inline-flex items-center gap-2 rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-200"><UserCheck className="h-4 w-4" />Review applications</Link>
+            <button onClick={() => void load()} aria-label="Refresh drivers" className="rounded-lg border border-slate-700 p-2 text-slate-200"><RefreshCw className="h-4 w-4" /></button>
+          </div>
+        </header>
+        {error && <p role="alert" className="rounded-lg border border-rose-700/50 bg-rose-950/40 p-3 text-sm text-rose-200">{error}</p>}
+        <div className="overflow-x-auto rounded-xl border border-slate-800 bg-slate-900">
+          {loading ? <p className="p-4 text-sm text-slate-400">Loading drivers…</p> : (
+            <table className="w-full text-left text-sm">
+              <thead className="bg-slate-950 text-xs uppercase text-slate-500"><tr><th className="p-3">Driver</th><th className="p-3">Approval</th><th className="p-3">Availability</th><th className="p-3">Vehicle</th><th className="p-3">Trips / rating</th></tr></thead>
+              <tbody>{drivers.map((driver) => <tr key={driver._id} className="border-t border-slate-800">
+                <td className="p-3"><div className="font-medium text-white">{driver.userId?.name || "Driver"}</div><div className="text-xs text-slate-400">{driver.userId?.email} · {driver.userId?.phone}</div><div className="mt-1 font-mono text-[10px] text-slate-500">{driver._id}</div></td>
+                <td className="p-3"><span className={driver.approvalStatus === "APPROVED" ? "text-emerald-300" : driver.approvalStatus === "REJECTED" ? "text-rose-300" : "text-amber-300"}>{driver.approvalStatus}</span></td>
+                <td className="p-3 text-slate-300">{driver.onlineStatus} · {driver.availabilityStatus}</td>
+                <td className="p-3 text-slate-300">{driver.activeVehicleId ? `${driver.activeVehicleId.make} ${driver.activeVehicleId.model} · ${driver.activeVehicleId.registrationNumber}` : "No active vehicle"}</td>
+                <td className="p-3 text-slate-300">{driver.totalTrips} · {driver.rating?.toFixed(1) || "—"}</td>
+              </tr>)}</tbody>
+            </table>
+          )}
+          {!loading && !drivers.length && <p className="p-4 text-sm text-slate-400">No drivers have registered.</p>}
+        </div>
       </div>
-    </div>
+    </PermissionGate>
   );
 }

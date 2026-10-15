@@ -1,7 +1,15 @@
 "use client";
 
-import React, { createContext, useContext, useState, useEffect } from "react";
+import React, {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 import { UserRole, Permission, ROLE_PERMISSIONS } from "../lib/types";
+import { apiRequest, clearSession, loginRequest } from "../lib/api";
 
 interface AuthUser {
   id: string;
@@ -11,89 +19,106 @@ interface AuthUser {
 }
 
 interface AuthContextType {
-  user: AuthUser;
-  role: UserRole;
-  setRole: (role: UserRole) => void;
+  user: AuthUser | null;
+  role: UserRole | null;
+  loading: boolean;
+  login: (email: string, password: string) => Promise<void>;
+  logout: () => Promise<void>;
   hasPermission: (permission: Permission) => boolean;
   hasRole: (...roles: UserRole[]) => boolean;
 }
 
-const DEFAULT_USERS: Record<UserRole, AuthUser> = {
-  [UserRole.ADMIN]: {
-    id: "USR-ADMIN-01",
-    name: "Sarah Executive",
-    email: "sarah.admin@2go.rw",
-    role: UserRole.ADMIN,
-  },
-  [UserRole.OPERATIONS]: {
-    id: "USR-OPS-01",
-    name: "Jean-Luc Operations",
-    email: "jeanluc.ops@2go.rw",
-    role: UserRole.OPERATIONS,
-  },
-  [UserRole.DISPATCHER]: {
-    id: "USR-DISPATCH-01",
-    name: "Claudine Dispatch",
-    email: "claudine.dispatch@2go.rw",
-    role: UserRole.DISPATCHER,
-  },
-  [UserRole.VIEWER]: {
-    id: "USR-AUDIT-01",
-    name: "David Auditor",
-    email: "david.auditor@2go.rw",
-    role: UserRole.VIEWER,
-  },
-};
+interface MeResponse {
+  user: {
+    id: string;
+    name: string;
+    email: string;
+    role: string;
+    status: string;
+  };
+}
+
+function toOperationsUser(user: MeResponse["user"]): AuthUser {
+  if (user.status !== "ACTIVE") {
+    throw new Error("This account is not active.");
+  }
+  const staffRoles = [
+    UserRole.SYSTEM_OWNER,
+    UserRole.ADMIN,
+    UserRole.OPERATIONS,
+    UserRole.AGENT,
+    UserRole.DISPATCHER,
+    UserRole.VIEWER,
+  ];
+  if (!staffRoles.includes(user.role as UserRole)) {
+    throw new Error("An Operations account is required.");
+  }
+  return {
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    role: user.role as UserRole,
+  };
+}
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [role, setRoleState] = useState<UserRole>(UserRole.OPERATIONS);
-  const [user, setUser] = useState<AuthUser>(
-    DEFAULT_USERS[UserRole.OPERATIONS],
-  );
+  const [user, setUser] = useState<AuthUser | null>(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Check if a saved role exists in localStorage
-    if (typeof window !== "undefined") {
-      const saved = localStorage.getItem("2go_ops_role") as UserRole;
-      if (saved && Object.values(UserRole).includes(saved)) {
-        setRoleState(saved);
-        setUser(DEFAULT_USERS[saved]);
-      }
+    let cancelled = false;
+    apiRequest<MeResponse>("/auth/me")
+      .then((result) => {
+        if (!cancelled) setUser(toOperationsUser(result.user));
+      })
+      .catch(() => {
+        if (!cancelled) setUser(null);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const login = useCallback(async (email: string, password: string) => {
+    const result = await loginRequest(email, password);
+    try {
+      setUser(toOperationsUser(result.user));
+    } catch (error) {
+      await clearSession();
+      throw error;
     }
   }, []);
 
-  const setRole = (newRole: UserRole) => {
-    setRoleState(newRole);
-    setUser(DEFAULT_USERS[newRole]);
-    if (typeof window !== "undefined") {
-      localStorage.setItem("2go_ops_role", newRole);
+  const logout = useCallback(async () => {
+    try {
+      await clearSession();
+    } finally {
+      setUser(null);
     }
-  };
+  }, []);
 
-  const hasPermission = (permission: Permission): boolean => {
-    const permissions = ROLE_PERMISSIONS[role] || [];
-    return permissions.includes(permission);
-  };
-
-  const hasRole = (...roles: UserRole[]): boolean => {
-    return roles.includes(role);
-  };
-
-  return (
-    <AuthContext.Provider
-      value={{
-        user,
-        role,
-        setRole,
-        hasPermission,
-        hasRole,
-      }}
-    >
-      {children}
-    </AuthContext.Provider>
+  const role = user?.role ?? null;
+  const hasPermission = useCallback(
+    (permission: Permission) =>
+      role ? (ROLE_PERMISSIONS[role] || []).includes(permission) : false,
+    [role],
   );
+  const hasRole = useCallback(
+    (...roles: UserRole[]) => role !== null && roles.includes(role),
+    [role],
+  );
+
+  const value = useMemo(
+    () => ({ user, role, loading, login, logout, hasPermission, hasRole }),
+    [user, role, loading, login, logout, hasPermission, hasRole],
+  );
+
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
 export function useAuth(): AuthContextType {

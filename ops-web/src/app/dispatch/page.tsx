@@ -1,133 +1,131 @@
 "use client";
 
-import React, { useState } from "react";
-import {
-  Radio,
-  Send,
-  CheckCircle2,
-  AlertCircle,
-  Lock,
-  Shield,
-} from "lucide-react";
+import React, { useEffect, useMemo, useState } from "react";
+import { AlertCircle, RefreshCw, Send, Shield } from "lucide-react";
+import { apiRequest } from "../../lib/api";
+import { Permission } from "../../lib/types";
+import { PermissionGate } from "../../components/PermissionGate";
 import { useAuth } from "../../context/AuthContext";
-import { Permission, UserRole } from "../../lib/types";
-import {
-  ProtectedButton,
-  PermissionGate,
-} from "../../components/PermissionGate";
+
+interface DispatchTrip {
+  _id: string;
+  status: string;
+  category: string;
+  estimatedFare: number;
+  pickup: { address: string };
+  destination: { address: string };
+}
+
+interface DispatchDriver {
+  _id: string;
+  approvalStatus: string;
+  onlineStatus: string;
+  availabilityStatus: string;
+  lastLocationUpdate?: string;
+  activeVehicleId?: { status: string; category: string; make: string; model: string; registrationNumber: string };
+  userId?: { name?: string };
+}
 
 export default function ManualDispatchPage() {
-  const { hasPermission, role } = useAuth();
-  const [selectedTrip, setSelectedTrip] = useState("TRIP-9901-PENDING");
-  const [selectedDriver, setSelectedDriver] = useState("DRV-1029");
-  const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const { role } = useAuth();
+  const [trips, setTrips] = useState<DispatchTrip[]>([]);
+  const [drivers, setDrivers] = useState<DispatchDriver[]>([]);
+  const [tripId, setTripId] = useState("");
+  const [driverId, setDriverId] = useState("");
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [processing, setProcessing] = useState(false);
 
-  const canDispatch = hasPermission(Permission.DISPATCH_EXECUTE);
+  async function reload() {
+    setError("");
+    try {
+      const [tripList, driverList] = await Promise.all([
+        apiRequest<DispatchTrip[]>("/admin/trips"),
+        apiRequest<DispatchDriver[]>("/admin/drivers"),
+      ]);
+      const openTrips = tripList.filter((trip) => ["REQUESTED", "SEARCHING_DRIVER"].includes(trip.status));
+      setTrips(openTrips);
+      setDrivers(driverList);
+      setTripId((current) => openTrips.some((trip) => trip._id === current) ? current : openTrips[0]?._id || "");
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Unable to load dispatch options.");
+    } finally {
+      setLoading(false);
+    }
+  }
 
-  const handleManualDispatch = () => {
-    setStatusMessage(
-      "Driver Bob Chauffeur (DRV-1029) assigned to Trip TRIP-9901-PENDING via Operations override.",
-    );
-  };
+  useEffect(() => { void reload(); }, []);
+
+  const selectedTrip = trips.find((trip) => trip._id === tripId);
+  const availableDrivers = useMemo(() => drivers.filter((driver) =>
+    driver.approvalStatus === "APPROVED" &&
+    driver.onlineStatus === "ONLINE" &&
+    driver.availabilityStatus === "AVAILABLE" &&
+    driver.activeVehicleId?.status === "ACTIVE" &&
+    driver.activeVehicleId.category === selectedTrip?.category &&
+    Boolean(driver.lastLocationUpdate && Date.now() - new Date(driver.lastLocationUpdate).getTime() < 120_000),
+  ), [drivers, selectedTrip?.category]);
+
+  useEffect(() => {
+    setDriverId((current) => availableDrivers.some((driver) => driver._id === current) ? current : availableDrivers[0]?._id || "");
+  }, [availableDrivers]);
+
+  async function assignDriver() {
+    if (!tripId || !driverId) return;
+    setProcessing(true);
+    setError("");
+    setNotice("");
+    try {
+      await apiRequest(`/admin/trips/${tripId}/assign`, {
+        method: "POST",
+        body: JSON.stringify({ driverId }),
+      });
+      setNotice("Driver assigned. The app has been notified.");
+      await reload();
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Unable to assign this driver.");
+    } finally {
+      setProcessing(false);
+    }
+  }
 
   return (
-    <div className="space-y-6 max-w-4xl mx-auto">
-      <div className="flex items-center justify-between">
-        <div>
-          <div className="flex items-center gap-3">
-            <h2 className="text-2xl font-bold text-white tracking-tight">
-              Manual Dispatch Console
-            </h2>
-            <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-indigo-500/10 text-indigo-400 border border-indigo-500/30">
-              RBAC Guarded
-            </span>
-          </div>
-          <p className="text-sm text-slate-400 mt-1">
-            Operations override to assign or reroute available drivers to
-            unfulfilled or VIP customer ride requests.
-          </p>
-        </div>
-
-        <div className="px-3 py-1.5 bg-slate-900 border border-slate-800 rounded-xl text-xs flex items-center gap-2">
-          <Shield className="w-3.5 h-3.5 text-indigo-400" />
-          <span className="text-slate-400">Active Role:</span>
-          <span className="font-bold text-slate-200">{role}</span>
-        </div>
-      </div>
-
-      {statusMessage && (
-        <div className="p-4 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-emerald-300 text-sm flex items-center gap-3">
-          <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
-          <span>{statusMessage}</span>
-        </div>
-      )}
-
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-6 shadow-lg">
-        <div className="space-y-4">
+    <PermissionGate permission={Permission.DISPATCH_EXECUTE}>
+      <main className="mx-auto max-w-4xl space-y-6">
+        <header className="flex items-end justify-between gap-3">
           <div>
-            <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2">
-              Select Unassigned / Searching Ride Request
-            </label>
-            <select
-              value={selectedTrip}
-              onChange={(e) => setSelectedTrip(e.target.value)}
-              className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-slate-200 focus:outline-none focus:border-emerald-500"
-            >
-              <option value="TRIP-9901-PENDING">
-                TRIP-9901-PENDING — Alice Rider (Kigali Heights ➡️ Kigali
-                Convention Centre) [4,500 RWF]
-              </option>
-            </select>
+            <div className="flex items-center gap-2"><Shield className="h-5 w-5 text-indigo-400" /><h1 className="text-2xl font-bold text-white">Manual dispatch</h1></div>
+            <p className="mt-1 text-sm text-slate-400">Assign an approved, online driver with a recent GPS fix and matching active vehicle.</p>
           </div>
-
-          <div>
-            <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2">
-              Select Candidate Driver (Online & Available)
-            </label>
-            <select
-              value={selectedDriver}
-              onChange={(e) => setSelectedDriver(e.target.value)}
-              className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-slate-200 focus:outline-none focus:border-emerald-500"
-            >
-              <option value="DRV-1029">
-                Bob Chauffeur (DRV-1029) — 0.4 km away — Toyota Corolla (RAD 892
-                B) [Rating: 4.95 ⭐]
-              </option>
-            </select>
-          </div>
-        </div>
-
-        <div className="p-4 bg-slate-950/60 rounded-xl border border-slate-800 text-xs text-slate-400 flex items-start gap-3">
-          <AlertCircle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
-          <div>
-            Manual dispatch will immediately notify the driver device via
-            Socket.IO offer, set availability status to BUSY, and update the
-            authoritative trip state machine.
-          </div>
-        </div>
-
-        {!canDispatch && (
-          <div className="p-3.5 bg-rose-500/10 border border-rose-500/30 rounded-xl text-rose-300 text-xs flex items-center gap-2">
-            <Lock className="w-4 h-4 text-rose-400 shrink-0" />
-            <span>
-              Manual dispatch execution is restricted for role{" "}
-              <span className="font-bold">{role}</span>. Switch to{" "}
-              <span className="font-bold">Dispatcher</span>,{" "}
-              <span className="font-bold">Operations</span>, or{" "}
-              <span className="font-bold">Admin</span> to execute overrides.
-            </span>
-          </div>
+          <button onClick={() => void reload()} aria-label="Refresh dispatch data" className="rounded-lg border border-slate-700 p-2 text-slate-200"><RefreshCw className="h-4 w-4" /></button>
+        </header>
+        {error && <p role="alert" className="rounded-lg border border-rose-700/50 bg-rose-950/40 p-3 text-sm text-rose-200">{error}</p>}
+        {notice && <p role="status" className="rounded-lg border border-emerald-700/50 bg-emerald-950/30 p-3 text-sm text-emerald-200">{notice}</p>}
+        {loading ? <p className="text-sm text-slate-400">Loading dispatch data…</p> : (
+          <section className="space-y-5 rounded-xl border border-slate-800 bg-slate-900 p-5">
+            <div>
+              <label className="text-xs font-semibold text-slate-300">Unassigned trip</label>
+              <select value={tripId} onChange={(event) => setTripId(event.target.value)} className="mt-2 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-3 text-sm text-white">
+                {trips.map((trip) => <option key={trip._id} value={trip._id}>{trip._id} · {trip.status} · {trip.category} · {trip.pickup.address} → {trip.destination.address} · {Math.round(trip.estimatedFare).toLocaleString()} RWF</option>)}
+              </select>
+              {!trips.length && <p className="mt-2 text-xs text-slate-500">There are no unassigned trips right now.</p>}
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-slate-300">Eligible driver</label>
+              <select value={driverId} onChange={(event) => setDriverId(event.target.value)} disabled={!availableDrivers.length} className="mt-2 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-3 text-sm text-white">
+                {availableDrivers.map((driver) => <option key={driver._id} value={driver._id}>{driver.userId?.name || driver._id} · {driver.activeVehicleId?.make} {driver.activeVehicleId?.model} ({driver.activeVehicleId?.registrationNumber})</option>)}
+              </select>
+              {!availableDrivers.length && <p className="mt-2 text-xs text-amber-300">No matching driver has an active vehicle, is online and available, and has a location update from the last two minutes.</p>}
+            </div>
+            <div className="flex items-start gap-3 rounded-lg border border-slate-800 bg-slate-950 p-3 text-xs text-slate-400">
+              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-amber-400" />
+              <span>Role: {role}. The API rechecks driver eligibility and trip state atomically before dispatch.</span>
+            </div>
+            <button disabled={processing || !tripId || !driverId} onClick={() => void assignDriver()} className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-cyan-500 px-4 py-3 text-sm font-bold text-slate-950 disabled:opacity-50"><Send className="h-4 w-4" />{processing ? "Assigning…" : "Assign driver"}</button>
+          </section>
         )}
-
-        <ProtectedButton
-          permission={Permission.DISPATCH_EXECUTE}
-          onClick={handleManualDispatch}
-          className="w-full py-3.5 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 font-bold text-slate-950 rounded-xl transition shadow-lg flex items-center justify-center gap-2"
-        >
-          <Send className="w-4 h-4" />
-          <span>Execute Authoritative Dispatch Override</span>
-        </ProtectedButton>
-      </div>
-    </div>
+      </main>
+    </PermissionGate>
   );
 }

@@ -47,7 +47,7 @@ export function PermissionGate({
         <div>
           <span className="font-semibold">Access Restricted:</span> Your active
           operational role does not have permission to perform this action.
-          Switch to an authorized role (`Operations` or `Admin`) to proceed.
+          Ask an administrator to grant the required operational permission.
         </div>
       </div>
     );

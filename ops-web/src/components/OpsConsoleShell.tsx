@@ -9,58 +9,155 @@ import {
   Navigation2,
   Radio,
   UserCheck,
-  Shield,
-  ChevronDown,
+  Users,
+  LogOut,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
-import { UserRole, ROLE_LABELS } from "../lib/types";
+import { Permission, ROLE_LABELS } from "../lib/types";
 
 export function OpsConsoleShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const { user, role, setRole } = useAuth();
-  const [roleDropdownOpen, setRoleDropdownOpen] = useState(false);
+  const { user, role, loading, login, logout, hasPermission } = useAuth();
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [loginError, setLoginError] = useState("");
+  const [isSigningIn, setIsSigningIn] = useState(false);
 
   const navItems = [
     {
       label: "Dashboard & KPIs",
-      href: "/",
+      href: "/dashboard",
       icon: LayoutDashboard,
       color: "text-emerald-400",
+      permission: Permission.VIEW_OPERATIONS,
     },
     {
       label: "Driver Onboarding",
       href: "/onboarding",
       icon: UserCheck,
       color: "text-teal-400",
-      badge: "2 Pending",
-      badgeColor: "bg-amber-500/20 text-amber-300 border-amber-500/30",
+      permission: Permission.DRIVER_VERIFY,
     },
     {
       label: "Active & Past Trips",
       href: "/trips",
       icon: Navigation2,
       color: "text-cyan-400",
+      permission: Permission.VIEW_OPERATIONS,
     },
     {
       label: "Drivers & Fleet",
       href: "/drivers",
       icon: Car,
       color: "text-amber-400",
+      permission: Permission.VIEW_OPERATIONS,
     },
     {
       label: "Manual Dispatch",
       href: "/dispatch",
       icon: Radio,
       color: "text-indigo-400",
+      permission: Permission.DISPATCH_EXECUTE,
+    },
+    {
+      label: "Users",
+      href: "/users",
+      icon: Users,
+      color: "text-violet-400",
+      permission: Permission.USER_MANAGE,
+    },
+    {
+      label: "Vehicles",
+      href: "/vehicles",
+      icon: Car,
+      color: "text-orange-400",
+      permission: Permission.FLEET_MANAGE,
     },
   ];
-
-  const currentRoleConfig =
-    ROLE_LABELS[role] || ROLE_LABELS[UserRole.OPERATIONS];
 
   if (pathname === "/") {
     return <>{children}</>;
   }
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex items-center justify-center text-sm text-slate-400">
+        Checking your Operations session...
+      </div>
+    );
+  }
+
+  if (!user || !role) {
+    const submitLogin = async (event: React.FormEvent<HTMLFormElement>) => {
+      event.preventDefault();
+      setIsSigningIn(true);
+      setLoginError("");
+      try {
+        await login(email, password);
+      } catch (error) {
+        setLoginError(
+          error instanceof Error ? error.message : "Unable to sign in.",
+        );
+      } finally {
+        setIsSigningIn(false);
+      }
+    };
+
+    return (
+      <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center px-5">
+        <form
+          onSubmit={submitLogin}
+          className="w-full max-w-md rounded-2xl border border-slate-800 bg-slate-900 p-7 shadow-xl"
+        >
+          <div className="mb-7">
+            <div className="text-2xl font-black text-white">2GO Operations</div>
+            <p className="mt-2 text-sm text-slate-400">
+              Sign in with your assigned Operations account.
+            </p>
+          </div>
+          <label className="mb-4 block text-xs font-semibold text-slate-300">
+            Email
+            <input
+              type="email"
+              autoComplete="username"
+              required
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              className="mt-2 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-3 text-sm text-white outline-none focus:border-cyan-500"
+            />
+          </label>
+          <label className="block text-xs font-semibold text-slate-300">
+            Password
+            <input
+              type="password"
+              autoComplete="current-password"
+              required
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              className="mt-2 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-3 text-sm text-white outline-none focus:border-cyan-500"
+            />
+          </label>
+          {loginError && (
+            <p role="alert" className="mt-3 text-sm text-rose-300">
+              {loginError}
+            </p>
+          )}
+          <button
+            type="submit"
+            disabled={isSigningIn}
+            className="mt-6 w-full rounded-xl bg-cyan-500 px-4 py-3 text-sm font-bold text-slate-950 disabled:opacity-60"
+          >
+            {isSigningIn ? "Signing in..." : "Sign in"}
+          </button>
+          <p className="mt-4 text-xs leading-5 text-slate-500">
+            Identity and permissions are checked by the main 2GO backend.
+          </p>
+        </form>
+      </div>
+    );
+  }
+
+  const currentRoleConfig = ROLE_LABELS[role];
 
   return (
     <div className="bg-slate-950 text-slate-100 min-h-screen flex w-full">
@@ -85,7 +182,9 @@ export function OpsConsoleShell({ children }: { children: React.ReactNode }) {
 
           {/* Nav List */}
           <nav className="space-y-1.5">
-            {navItems.map((item) => {
+            {navItems
+              .filter((item) => hasPermission(item.permission))
+              .map((item) => {
               const isActive = pathname === item.href;
               const Icon = item.icon;
               return (
@@ -102,16 +201,9 @@ export function OpsConsoleShell({ children }: { children: React.ReactNode }) {
                     <Icon className={`w-4 h-4 ${item.color}`} />
                     <span>{item.label}</span>
                   </div>
-                  {item.badge && (
-                    <span
-                      className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${item.badgeColor}`}
-                    >
-                      {item.badge}
-                    </span>
-                  )}
                 </Link>
               );
-            })}
+              })}
           </nav>
         </div>
 
@@ -156,59 +248,6 @@ export function OpsConsoleShell({ children }: { children: React.ReactNode }) {
               <span>Real-Time Mesh Connected</span>
             </div>
 
-            {/* RBAC Role Switcher Dropdown */}
-            <div className="relative">
-              <button
-                onClick={() => setRoleDropdownOpen(!roleDropdownOpen)}
-                className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700/80 border border-slate-700 text-xs transition"
-              >
-                <Shield className="w-3.5 h-3.5 text-emerald-400" />
-                <span className="text-slate-400 font-medium">Role:</span>
-                <span className="font-bold text-white">{role}</span>
-                <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
-              </button>
-
-              {roleDropdownOpen && (
-                <div className="absolute right-0 mt-2 w-72 bg-slate-900 border border-slate-700 rounded-2xl p-2 shadow-2xl z-50 space-y-1">
-                  <div className="px-3 py-2 text-[11px] font-semibold uppercase tracking-wider text-slate-400 border-b border-slate-800">
-                    Switch Operational Role (RBAC)
-                  </div>
-                  {Object.values(UserRole).map((r) => {
-                    const rConfig = ROLE_LABELS[r];
-                    const isSelected = role === r;
-                    return (
-                      <button
-                        key={r}
-                        onClick={() => {
-                          setRole(r);
-                          setRoleDropdownOpen(false);
-                        }}
-                        className={`w-full text-left p-2.5 rounded-xl transition text-xs flex flex-col ${
-                          isSelected
-                            ? "bg-slate-800 border border-slate-700 text-white font-semibold"
-                            : "hover:bg-slate-800/50 text-slate-300"
-                        }`}
-                      >
-                        <div className="flex items-center justify-between">
-                          <span className="font-bold text-white">
-                            {rConfig.label}
-                          </span>
-                          <span
-                            className={`px-1.5 py-0.2 rounded text-[10px] border ${rConfig.color}`}
-                          >
-                            {r}
-                          </span>
-                        </div>
-                        <span className="text-[11px] text-slate-400 mt-0.5">
-                          {rConfig.description}
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-
             {/* User Avatar */}
             <div className="flex items-center gap-2.5 pl-2 border-l border-slate-800">
               <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-emerald-600 to-teal-500 flex items-center justify-center font-bold text-xs text-slate-950 shadow-md">
@@ -224,6 +263,13 @@ export function OpsConsoleShell({ children }: { children: React.ReactNode }) {
                 <div className="text-[10px] text-slate-400">{user.email}</div>
               </div>
             </div>
+            <button
+              onClick={() => void logout()}
+              aria-label="Sign out"
+              className="rounded-lg p-2 text-slate-400 transition hover:bg-slate-800 hover:text-white"
+            >
+              <LogOut className="h-4 w-4" />
+            </button>
           </div>
         </header>
 
