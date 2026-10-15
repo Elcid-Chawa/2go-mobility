@@ -1,18 +1,74 @@
 import request from "supertest";
 import { createApp } from "../src/app";
 import { setupTestDB } from "./setup";
-import { UserRole } from "../src/constants/roles";
+import { UserRole, UserStatus } from "../src/constants/roles";
 import {
   DriverOnlineStatus,
   DriverAvailabilityStatus,
   TripStatus,
+  DriverApprovalStatus,
 } from "../src/constants/tripStatus";
-import { VehicleCategory } from "../src/constants/vehicleCategory";
+import { VehicleCategory, VehicleStatus } from "../src/constants/vehicleCategory";
 import { PricingRule } from "../src/modules/pricing/pricing.model";
+import { Driver } from "../src/modules/drivers/driver.model";
+import { Vehicle } from "../src/modules/vehicles/vehicle.model";
+import { User } from "../src/modules/users/user.model";
+import bcrypt from "bcryptjs";
+import jwt from "jsonwebtoken";
+import { env } from "../src/config/env";
 
 setupTestDB();
 
 const app = createApp();
+
+async function createAdminToken(): Promise<string> {
+  const passwordHash = await bcrypt.hash("adminPassword123", 10);
+  const admin = await User.create({
+    name: "Ops Admin",
+    email: "admin@2go.internal",
+    phone: "+1888000111",
+    passwordHash,
+    role: UserRole.ADMIN,
+    status: UserStatus.ACTIVE,
+  });
+  return jwt.sign(
+    {
+      userId: admin._id.toString(),
+      role: UserRole.ADMIN,
+      email: admin.email,
+    },
+    env.JWT_ACCESS_SECRET,
+    { expiresIn: "1h" },
+  );
+}
+
+async function activateTestDriver(
+  driverProfileId: string,
+  registrationNumber: string,
+  vin: string,
+): Promise<void> {
+  const driver = await Driver.findByIdAndUpdate(
+    driverProfileId,
+    { approvalStatus: DriverApprovalStatus.APPROVED },
+    { new: true },
+  );
+  if (!driver) {
+    throw new Error("Test driver profile was not created");
+  }
+  const vehicle = await Vehicle.create({
+    driverId: driver._id,
+    registrationNumber,
+    vin,
+    make: "Test",
+    model: "Vehicle",
+    year: 2024,
+    color: "Blue",
+    category: VehicleCategory.STANDARD,
+    status: VehicleStatus.ACTIVE,
+  });
+  driver.activeVehicleId = vehicle._id;
+  await driver.save();
+}
 
 describe("2GO Full Ride-Hailing Vertical Slice Lifecycle E2E", () => {
   it("should successfully execute entire ride lifecycle: Auth -> Online -> Estimate -> Dispatch -> Arrive -> Start -> Stream -> Complete -> Pay -> Rate -> Ops Dashboard", async () => {
@@ -28,15 +84,7 @@ describe("2GO Full Ride-Hailing Vertical Slice Lifecycle E2E", () => {
     });
 
     // 1. Register Admin, Customer, and Driver
-    const adminReg = await request(app).post("/api/v1/auth/register").send({
-      name: "Ops Admin",
-      email: "admin@2go.internal",
-      phone: "+1888000111",
-      password: "adminPassword123",
-      role: UserRole.ADMIN,
-    });
-    expect(adminReg.status).toBe(201);
-    const adminToken = adminReg.body.data.tokens.accessToken;
+    const adminToken = await createAdminToken();
 
     const custReg = await request(app).post("/api/v1/auth/register").send({
       name: "Alice Rider",
@@ -59,6 +107,11 @@ describe("2GO Full Ride-Hailing Vertical Slice Lifecycle E2E", () => {
     expect(driverReg.status).toBe(201);
     const driverToken = driverReg.body.data.tokens.accessToken;
     const driverProfileId = driverReg.body.data.profileId;
+    await activateTestDriver(
+      driverProfileId,
+      "TEST-VEHICLE-001",
+      "TEST-VIN-00000000001",
+    );
 
     // 2. Driver goes online and reports GPS position
     const statusRes = await request(app)
@@ -265,6 +318,11 @@ describe("2GO Full Ride-Hailing Vertical Slice Lifecycle E2E", () => {
       role: UserRole.DRIVER,
       licenseNumber: "DL-123",
     });
+    await activateTestDriver(
+      driver.body.data.profileId,
+      "TEST-VEHICLE-002",
+      "TEST-VIN-00000000002",
+    );
 
     await request(app)
       .patch("/api/v1/drivers/me/status")

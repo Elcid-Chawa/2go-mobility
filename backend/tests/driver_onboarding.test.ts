@@ -13,10 +13,46 @@ import { Vehicle } from "../src/modules/vehicles/vehicle.model";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { env } from "../src/config/env";
+import fs from "fs";
+import path from "path";
 
 setupTestDB();
 
 const app = createApp();
+const uploadedFiles: string[] = [];
+
+async function uploadRequiredDocuments(token: string): Promise<Record<string, string>> {
+  const documents: Record<string, string> = {};
+  for (const kind of [
+    "profilePhoto",
+    "vehiclePreviewImage",
+    "idDocument",
+    "drivingLicense",
+    "vehicleRegistration",
+  ]) {
+    const response = await request(app)
+      .post("/api/v1/onboarding/files")
+      .set("Authorization", `Bearer ${token}`)
+      .field("kind", kind)
+      .attach("file", Buffer.from([0xff, 0xd8, 0xff, 0x00]), {
+        filename: `${kind}.jpg`,
+        contentType: "image/jpeg",
+      });
+    expect(response.status).toBe(201);
+    const filename = response.body.data.documents[kind];
+    documents[kind] = filename;
+    uploadedFiles.push(path.join(env.UPLOAD_DIR, filename));
+  }
+  return documents;
+}
+
+afterAll(async () => {
+  await Promise.all(
+    uploadedFiles.map((file) =>
+      fs.promises.unlink(file).catch(() => undefined),
+    ),
+  );
+});
 
 describe("Driver Onboarding Routes", () => {
   let driverAccessToken: string;
@@ -99,6 +135,25 @@ describe("Driver Onboarding Routes", () => {
 
       expect(res.status).toBe(403);
     });
+
+    it("does not grant privileged roles through public registration", async () => {
+      const res = await request(app).post("/api/v1/auth/register").send({
+        name: "Unauthorized Operator",
+        email: "operator@example.com",
+        phone: "+250788111112",
+        password: "Password123!",
+        role: UserRole.ADMIN,
+      });
+      expect(res.status).toBe(400);
+    });
+
+    it("does not allow a driver to go online before approval", async () => {
+      const res = await request(app)
+        .patch("/api/v1/drivers/me/status")
+        .set("Authorization", `Bearer ${driverAccessToken}`)
+        .send({ onlineStatus: "ONLINE" });
+      expect(res.status).toBe(403);
+    });
   });
 
   describe("Step-by-step onboarding updates", () => {
@@ -113,6 +168,7 @@ describe("Driver Onboarding Routes", () => {
           phoneNumber: "+250788000001",
           idDocumentType: "NATIONAL_ID",
           idDocumentNumber: "1199280012345678",
+          drivingLicenseNumber: "DL-RW-12345",
         });
 
       expect(res.status).toBe(200);
@@ -151,6 +207,7 @@ describe("Driver Onboarding Routes", () => {
           year: 2021,
           color: "Silver",
           licensePlate: "RAB 123 C",
+          vin: "VIN-RAB123C",
         });
 
       expect(res.status).toBe(200);
@@ -179,6 +236,40 @@ describe("Driver Onboarding Routes", () => {
       expect(res.body.data.documents.drivingLicense).toContain(
         "license_DL12345.jpg",
       );
+    });
+
+    it("stores uploaded files privately and rejects non-image content", async () => {
+      const uploaded = await request(app)
+        .post("/api/v1/onboarding/files")
+        .set("Authorization", `Bearer ${driverAccessToken}`)
+        .field("kind", "profilePhoto")
+        .attach("file", Buffer.from([0xff, 0xd8, 0xff, 0x00]), {
+          filename: "profile.jpg",
+          contentType: "image/jpeg",
+        });
+      expect(uploaded.status).toBe(201);
+      const filename = uploaded.body.data.documents.profilePhoto as string;
+      uploadedFiles.push(path.join(env.UPLOAD_DIR, filename));
+
+      const ownerRead = await request(app)
+        .get(`/api/v1/onboarding/files/${filename}`)
+        .set("Authorization", `Bearer ${driverAccessToken}`);
+      expect(ownerRead.status).toBe(200);
+
+      const otherUserRead = await request(app)
+        .get(`/api/v1/onboarding/files/${filename}`)
+        .set("Authorization", `Bearer ${customerAccessToken}`);
+      expect(otherUserRead.status).toBe(403);
+
+      const invalid = await request(app)
+        .post("/api/v1/onboarding/files")
+        .set("Authorization", `Bearer ${driverAccessToken}`)
+        .field("kind", "vehiclePreviewImage")
+        .attach("file", Buffer.from("<html>not an image</html>"), {
+          filename: "vehicle.jpg",
+          contentType: "image/jpeg",
+        });
+      expect(invalid.status).toBe(400);
     });
 
     it("should save draft with partial data", async () => {
@@ -227,6 +318,7 @@ describe("Driver Onboarding Routes", () => {
           phoneNumber: "+250788000001",
           idDocumentType: "NATIONAL_ID",
           idDocumentNumber: "1199280012345678",
+          drivingLicenseNumber: "DL-RW-12345",
         });
 
       await request(app)
@@ -248,14 +340,15 @@ describe("Driver Onboarding Routes", () => {
           year: 2021,
           color: "White",
           licensePlate: "RAE 789 X",
+          vin: "VIN-RAE789X",
         });
 
+      const documents = await uploadRequiredDocuments(driverAccessToken);
       await request(app)
         .patch("/api/v1/onboarding/documents")
         .set("Authorization", `Bearer ${driverAccessToken}`)
         .send({
-          idDocument: "https://cdn.2go.rw/docs/id.jpg",
-          drivingLicense: "https://cdn.2go.rw/docs/license.jpg",
+          ...documents,
         });
 
       // 2. Submit application
@@ -290,6 +383,7 @@ describe("Driver Onboarding Routes", () => {
             phoneNumber: "+250788000001",
             idDocumentType: "NATIONAL_ID",
             idDocumentNumber: "1199280012345678",
+            drivingLicenseNumber: "DL-RW-12345",
           },
           address: {
             street: "KG 15 Ave",
@@ -303,12 +397,15 @@ describe("Driver Onboarding Routes", () => {
             year: 2022,
             color: "Silver",
             licensePlate: "RAD 999 Z",
-          },
-          documents: {
-            idDocument: "https://cdn.2go.rw/docs/id.jpg",
-            drivingLicense: "https://cdn.2go.rw/docs/license.jpg",
+            vin: "VIN-RAD999Z",
           },
         });
+
+      const documents = await uploadRequiredDocuments(driverAccessToken);
+      await request(app)
+        .post("/api/v1/onboarding/draft")
+        .set("Authorization", `Bearer ${driverAccessToken}`)
+        .send({ documents });
 
       const submitRes = await request(app)
         .post("/api/v1/onboarding/submit")
@@ -326,6 +423,13 @@ describe("Driver Onboarding Routes", () => {
       expect(res.body.success).toBe(true);
       expect(res.body.data.applications.length).toBeGreaterThanOrEqual(1);
       expect(res.body.data.total).toBeGreaterThanOrEqual(1);
+    });
+
+    it("enforces operational permissions on administration endpoints", async () => {
+      const response = await request(app)
+        .get("/api/v1/admin/users")
+        .set("Authorization", `Bearer ${customerAccessToken}`);
+      expect(response.status).toBe(403);
     });
 
     it("should allow admin to view specific application by ID", async () => {
