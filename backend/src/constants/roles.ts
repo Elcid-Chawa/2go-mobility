@@ -5,6 +5,8 @@ export enum UserRole {
   ADMIN = 'ADMIN',
   SYSTEM_OWNER = 'SYSTEM_OWNER',
   AGENT = 'AGENT',
+  DISPATCHER = 'DISPATCHER',
+  VIEWER = 'VIEWER',
 }
 
 export enum UserStatus {

@@ -17,4 +17,5 @@ export const env = {
   LOG_LEVEL: process.env.LOG_LEVEL || 'info',
   DISPATCH_OFFER_TIMEOUT_SECONDS: parseInt(process.env.DISPATCH_OFFER_TIMEOUT_SECONDS || '15', 10),
   DISPATCH_SEARCH_RADIUS_KM: parseFloat(process.env.DISPATCH_SEARCH_RADIUS_KM || '10'),
+  UPLOAD_DIR: process.env.UPLOAD_DIR || path.resolve(process.cwd(), 'uploads'),
 };

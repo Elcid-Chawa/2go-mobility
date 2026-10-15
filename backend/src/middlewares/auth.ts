@@ -3,6 +3,7 @@ import jwt from 'jsonwebtoken';
 import { env } from '../config/env';
 import { User, IUser } from '../modules/users/user.model';
 import { UserRole } from '../constants/roles';
+import { Permission, ROLE_PERMISSIONS } from '../constants/permissions';
 import { ApiResponse } from '../utils/apiResponse';
 
 export interface AuthRequest extends Request {
@@ -61,6 +62,21 @@ export const requireRoles = (...allowedRoles: UserRole[]) => {
         `Forbidden: Access denied for role '${req.userRole}'. Allowed: [${allowedRoles.join(', ')}]`,
         403
       );
+    }
+
+    return next();
+  };
+};
+
+export const requirePermissions = (...permissions: Permission[]) => {
+  return (req: AuthRequest, res: Response, next: NextFunction): any => {
+    if (!req.user || !req.userRole) {
+      return ApiResponse.error(res, 'Unauthorized', 401);
+    }
+
+    const granted = ROLE_PERMISSIONS[req.userRole] || [];
+    if (!permissions.every((permission) => granted.includes(permission))) {
+      return ApiResponse.error(res, 'Forbidden: required operational permission is missing.', 403);
     }
 
     return next();
