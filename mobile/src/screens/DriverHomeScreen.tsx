@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { PersonCard, RouteCard, ui } from "../design";
+import { TripChatPanel } from "../components/TripChatPanel";
 import {
   Alert,
   StyleSheet,
@@ -92,7 +93,13 @@ function DriverMap({
   );
 }
 
-export function DriverHomeScreen({ userName }: { userName: string }) {
+export function DriverHomeScreen({
+  userId,
+  userName,
+}: {
+  userId: string;
+  userName: string;
+}) {
   const [activeTab, setActiveTab] = useState<"Rides" | "Earnings">("Rides");
   const [isOnline, setIsOnline] = useState(false);
   const [driverState, setDriverState] = useState<
@@ -412,6 +419,9 @@ export function DriverHomeScreen({ userName }: { userName: string }) {
             <TouchableOpacity style={styles.cancelRideButton} onPress={confirmDriverCancellation}>
               <Text style={styles.cancelRideText}>Cancel accepted ride</Text>
             </TouchableOpacity>
+            {offerTrip?._id && (
+              <TripChatPanel tripId={offerTrip._id} userId={userId} title="Chat with your rider" />
+            )}
           </View>
         )}
 
@@ -436,6 +446,9 @@ export function DriverHomeScreen({ userName }: { userName: string }) {
             <TouchableOpacity style={styles.cancelRideButton} onPress={confirmDriverCancellation}>
               <Text style={styles.cancelRideText}>Cancel before trip starts</Text>
             </TouchableOpacity>
+            {offerTrip?._id && (
+              <TripChatPanel tripId={offerTrip._id} userId={userId} title="Chat with your rider" />
+            )}
           </View>
         )}
 
@@ -461,6 +474,9 @@ export function DriverHomeScreen({ userName }: { userName: string }) {
                 )
               </Text>
             </TouchableOpacity>
+            {offerTrip?._id && (
+              <TripChatPanel tripId={offerTrip._id} userId={userId} title="Chat with your rider" />
+            )}
           </View>
         )}
         {driverState === "COMPLETED" && <View style={styles.card}>

@@ -1,4 +1,6 @@
 import { CarIcon, PersonCard, RouteCard, ui } from "../design";
+import { ServicesHomeScreen } from "./ServicesHomeScreen";
+import { TripChatPanel } from "../components/TripChatPanel";
 import React, { useEffect, useRef, useState } from "react";
 import {
   Alert,
@@ -150,7 +152,7 @@ export function CustomerHomeScreen({
   onSignOut: () => void;
 }) {
   const userName = user.name;
-  const [activeTab, setActiveTab] = useState<"Rides" | "Activity" | "Profile">("Rides");
+  const [activeTab, setActiveTab] = useState<"Services" | "Rides" | "Activity" | "Account">("Services");
   const [history, setHistory] = useState<Trip[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [profile, setProfile] = useState<CustomerProfile | null>(null);
@@ -206,7 +208,7 @@ export function CustomerHomeScreen({
 
   useEffect(() => {
     if (activeTab === "Activity") loadHistory();
-    if (activeTab === "Profile" && !profile) {
+    if (activeTab === "Account" && !profile) {
       getCustomerProfile()
         .then((value) => {
           setProfile(value);
@@ -592,6 +594,16 @@ export function CustomerHomeScreen({
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
+        {activeTab === "Services" && (
+          <ServicesHomeScreen
+            user={user}
+            currentLocation={currentLocation}
+            activeTrip={trip}
+            onSelectRide={() => setActiveTab("Rides")}
+            onSelectActivity={() => setActiveTab("Activity")}
+            onSelectAccount={() => setActiveTab("Account")}
+          />
+        )}
         {activeTab === "Rides" && <>
         {tripState === "IDLE" && <View style={{position: "absolute", top: 12, left: 16, right: 16, zIndex: 5}}>
             <View style={styles.searchBox}>
@@ -782,6 +794,9 @@ export function CustomerHomeScreen({
             <TouchableOpacity style={styles.cancelRideButton} onPress={confirmCancelTrip}>
               <Text style={styles.cancelRideText}>Cancel ride</Text>
             </TouchableOpacity>
+            {trip?._id && ["DRIVER_ACCEPTED", "DRIVER_ARRIVED"].includes(trip.status) && (
+              <TripChatPanel tripId={trip._id} userId={user.id} title="Chat with your driver" />
+            )}
           </View>
         )}
 
@@ -806,6 +821,9 @@ export function CustomerHomeScreen({
             >
               <Text style={styles.primaryButtonText}>Refresh trip status</Text>
             </TouchableOpacity>
+            {trip?._id && (
+              <TripChatPanel tripId={trip._id} userId={user.id} title="Chat with your driver" />
+            )}
           </View>
         )}
 
@@ -887,10 +905,10 @@ export function CustomerHomeScreen({
           </View>
         )}
 
-        {activeTab === "Profile" && (
+        {activeTab === "Account" && (
           <View style={styles.tabPage}>
             <Text style={styles.tabEyebrow}>YOUR ACCOUNT</Text>
-            <Text style={styles.tabTitle}>Profile</Text>
+            <Text style={styles.tabTitle}>Account</Text>
             <View style={styles.profileHero}>
               <View style={styles.profileAvatar}><Text style={styles.profileAvatarText}>{profileName.slice(0, 1).toUpperCase()}</Text></View>
               <View style={{ flex: 1 }}><Text style={styles.profileHeroName}>{profileName}</Text><Text style={styles.profileEmail}>{user.email}</Text></View>
@@ -921,7 +939,7 @@ export function CustomerHomeScreen({
         )}
       </ScrollView>
       <View style={styles.bottomNav}>
-        {(["Rides", "Activity", "Profile"] as const).map((tab) => (
+        {(["Services", "Rides", "Activity", "Account"] as const).map((tab) => (
           <TouchableOpacity
             key={tab}
             accessibilityRole="tab"
@@ -930,7 +948,7 @@ export function CustomerHomeScreen({
             style={styles.navItem}
           >
             <Text style={[styles.navIcon, activeTab === tab && styles.navActive]}>
-              {tab === "Rides" ? "◎" : tab === "Activity" ? "↗" : "○"}
+              {tab === "Services" ? "▦" : tab === "Rides" ? "▰" : tab === "Activity" ? "▤" : "♙"}
             </Text>
             <Text style={[styles.navLabel, activeTab === tab && styles.navActive]}>{tab}</Text>
           </TouchableOpacity>
@@ -1341,13 +1359,6 @@ const styles = StyleSheet.create({
   },
   inputGroup: {
     marginBottom: 14,
-  },
-  inputLabel: {
-    fontSize: 12,
-    fontWeight: "600",
-    color: "#94a3b8",
-    marginBottom: 6,
-    textTransform: "uppercase",
   },
   input: {
     backgroundColor: "#090d16",

@@ -1,4 +1,6 @@
 import * as SecureStore from "expo-secure-store";
+import { File as ExpoFile, UploadType } from "expo-file-system";
+import { Platform } from "react-native";
 import { io, Socket } from "socket.io-client";
 
 declare const process: { env: Record<string, string | undefined> };
@@ -379,6 +381,134 @@ export interface CustomerProfile {
     location: { coordinates: [number, number] };
   }>;
   trustedContacts: Array<{ _id?: string; name: string; phone: string }>;
+}
+
+export type OnboardingDocumentKind =
+  | "profilePhoto"
+  | "vehiclePreviewImage"
+  | "idDocument"
+  | "drivingLicense"
+  | "vehicleRegistration"
+  | "insuranceCertificate";
+
+export interface DriverOnboarding {
+  _id: string;
+  onboardingStatus: "NOT_STARTED" | "IN_PROGRESS" | "COMPLETED" | "REJECTED";
+  verificationStatus:
+    | "NOT_VERIFIED"
+    | "VERIFICATION_IN_PROGRESS"
+    | "VERIFIED"
+    | "REJECTED";
+  personalInfo: {
+    firstName?: string;
+    lastName?: string;
+    dateOfBirth?: string;
+    phoneNumber?: string;
+    idDocumentType?: string;
+    idDocumentNumber?: string;
+    drivingLicenseNumber?: string;
+    drivingLicenseExpiryDate?: string;
+  };
+  address: {
+    street?: string;
+    city?: string;
+    state?: string;
+    zipCode?: string;
+    country?: string;
+  };
+  vehicleInfo: {
+    make?: string;
+    model?: string;
+    year?: number;
+    color?: string;
+    licensePlate?: string;
+    vin?: string;
+    category?: VehicleCategory;
+  };
+  documents: Partial<Record<OnboardingDocumentKind, string>>;
+  review?: { notes?: string; rejectionReason?: string; reviewedAt?: string };
+}
+
+export async function getDriverOnboarding() {
+  const token = await getAccessToken();
+  return request<DriverOnboarding>(
+    "/driver-onboarding/me",
+    {},
+    token || undefined,
+  );
+}
+
+export async function saveDriverOnboardingDraft(
+  input: Omit<DriverOnboarding, "_id" | "onboardingStatus" | "verificationStatus" | "review">,
+) {
+  const token = await getAccessToken();
+  return request<DriverOnboarding>(
+    "/driver-onboarding/draft",
+    { method: "PUT", body: JSON.stringify(input) },
+    token || undefined,
+  );
+}
+
+export async function uploadDriverOnboardingFile(
+  kind: OnboardingDocumentKind,
+  asset: {
+    uri: string;
+    name: string;
+    mimeType?: string | null;
+    file?: Blob;
+  },
+) {
+  const token = await getAccessToken();
+  if (!token) throw new Error("Sign in to upload your documents.");
+
+  if (Platform.OS !== "web") {
+    const result = await new ExpoFile(asset.uri).upload(
+      `${API_URL}/driver-onboarding/files`,
+      {
+        uploadType: UploadType.MULTIPART,
+        fieldName: "file",
+        mimeType: asset.mimeType || "application/octet-stream",
+        headers: { Authorization: `Bearer ${token}` },
+        parameters: { kind },
+      },
+    );
+    let body: { success?: boolean; message?: string; data?: DriverOnboarding };
+    try {
+      body = JSON.parse(result.body);
+    } catch {
+      body = {};
+    }
+    if (result.status < 200 || result.status >= 300 || body.success === false) {
+      throw new Error(body.message || "Unable to upload that file.");
+    }
+    return body.data as DriverOnboarding;
+  }
+
+  if (!asset.file) {
+    throw new Error("The selected file is unavailable. Please choose it again.");
+  }
+  const formData = new FormData();
+  formData.append("kind", kind);
+  formData.append("file", asset.file, asset.name);
+  const response = await fetch(`${API_URL}/driver-onboarding/files`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    body: formData,
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok || body.success === false) {
+    throw new Error(body.message || "Unable to upload that file.");
+  }
+  return body.data as DriverOnboarding;
+}
+
+export async function submitDriverOnboarding() {
+  const token = await getAccessToken();
+  return request<DriverOnboarding>(
+    "/driver-onboarding/submit",
+    { method: "POST" },
+    token || undefined,
+  );
 }
 
 export async function getActiveTrip() {

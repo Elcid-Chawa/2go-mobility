@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import {
   StyleSheet,
   View,
@@ -10,7 +10,8 @@ import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import { CustomerHomeScreen } from "./src/screens/CustomerHomeScreen";
 import { DriverHomeScreen } from "./src/screens/DriverHomeScreen";
 import { AuthScreen } from "./src/screens/AuthScreen";
-import { AuthUser, logout, restoreSession } from "./src/api";
+import { DriverOnboardingScreen } from "./src/screens/DriverOnboardingScreen";
+import { AuthUser, DriverOnboarding, getDriverOnboarding, logout, restoreSession } from "./src/api";
 
 export default function App() {
   return (
@@ -58,13 +59,13 @@ function AppContent() {
     <SafeAreaView style={styles.safeArea}>
       <StatusBar barStyle="light-content" backgroundColor="#0e1519" />
 
-      <View style={styles.sessionBar}>
+      {user.role === "DRIVER" && <View style={styles.sessionBar}>
         <Text style={styles.sessionName}>2Go</Text>
-        <Text style={styles.sessionRole}>{user.role === "CUSTOMER" ? "RIDER" : "DRIVER PARTNER"}</Text>
+        <Text style={styles.sessionRole}>DRIVER PARTNER</Text>
         <TouchableOpacity style={{ marginLeft: "auto", padding: 12 }} accessibilityLabel="Sign out" onPress={() => logout().then(() => setUser(null))}>
           <Text style={styles.sessionLogout}>Sign out</Text>
         </TouchableOpacity>
-      </View>
+      </View>}
 
       <View style={styles.content}>
         {user.role === "CUSTOMER" ? (
@@ -74,10 +75,58 @@ function AppContent() {
             onSignOut={() => logout().then(() => setUser(null))}
           />
         ) : (
-          <DriverHomeScreen userName={user.name} />
+          <DriverPortal user={user} />
         )}
       </View>
     </SafeAreaView>
+  );
+}
+
+function DriverPortal({ user }: { user: AuthUser }) {
+  const [application, setApplication] = useState<DriverOnboarding | null>(null);
+  const [loading, setLoading] = useState(true);
+  const updateApplication = useCallback((value: DriverOnboarding) => {
+    setApplication(value);
+    setLoading(false);
+  }, []);
+
+  useEffect(() => {
+    let mounted = true;
+    getDriverOnboarding()
+      .then((value) => {
+        if (mounted) setApplication(value);
+      })
+      .catch(() => {
+        if (mounted) setApplication(null);
+      })
+      .finally(() => {
+        if (mounted) setLoading(false);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, [user.id]);
+
+  if (loading) {
+    return (
+      <View style={styles.loading}>
+        <Text style={styles.modeLabel}>2GO DRIVER</Text>
+      </View>
+    );
+  }
+
+  if (
+    application?.verificationStatus === "VERIFIED" &&
+    application.onboardingStatus === "COMPLETED"
+  ) {
+    return <DriverHomeScreen userId={user.id} userName={user.name} />;
+  }
+
+  return (
+    <DriverOnboardingScreen
+      user={user}
+      onApplicationChanged={updateApplication}
+    />
   );
 }
 
