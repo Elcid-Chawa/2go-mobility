@@ -17,6 +17,13 @@ export const personalInfoSchema = z.object({
     phoneNumber: z.string().min(7, "Phone number must be at least 7 digits"),
     idDocumentType: z.string().min(1, "ID document type is required"),
     idDocumentNumber: z.string().min(1, "ID document number is required"),
+    drivingLicenseNumber: z.string().min(1, "Driving license number is required"),
+    drivingLicenseExpiryDate: z
+      .string()
+      .optional()
+      .refine((value) => !value || !isNaN(new Date(value).getTime()), {
+        message: "Invalid driving license expiry date",
+      }),
   }),
 });
 
@@ -32,8 +39,8 @@ export const addressSchema = z.object({
 
 export const vehicleInfoSchema = z.object({
   body: z.object({
-    make: z.string().optional(),
-    model: z.string().optional(),
+    make: z.string().min(1, "Vehicle make is required"),
+    model: z.string().min(1, "Vehicle model is required"),
     year: z
       .number()
       .int()
@@ -42,6 +49,8 @@ export const vehicleInfoSchema = z.object({
       .optional(),
     color: z.string().min(1, "Vehicle color is required"),
     licensePlate: z.string().min(1, "License plate is required"),
+    vin: z.string().min(1, "Vehicle identification number is required"),
+    category: z.enum(["STANDARD", "COMFORT", "PREMIUM", "XL"]).optional(),
   }),
 });
 
@@ -55,13 +64,14 @@ export const documentsSchema = z.object({
     vehicleRegistration: z
       .string()
       .url("Invalid vehicle registration URL")
-      .or(z.string().min(1))
-      .optional(),
+      .or(z.string().min(1)),
     insuranceCertificate: z
       .string()
       .url("Invalid insurance certificate URL")
       .or(z.string().min(1))
       .optional(),
+    profilePhoto: z.string().optional(),
+    vehiclePreviewImage: z.string().optional(),
   }),
 });
 
@@ -75,6 +85,8 @@ export const saveDraftSchema = z.object({
         phoneNumber: z.string().optional(),
         idDocumentType: z.string().optional(),
         idDocumentNumber: z.string().optional(),
+        drivingLicenseNumber: z.string().optional(),
+        drivingLicenseExpiryDate: z.string().optional(),
       })
       .optional(),
     address: z
@@ -93,6 +105,8 @@ export const saveDraftSchema = z.object({
         year: z.number().optional(),
         color: z.string().optional(),
         licensePlate: z.string().optional(),
+        vin: z.string().optional(),
+        category: z.enum(["STANDARD", "COMFORT", "PREMIUM", "XL"]).optional(),
       })
       .optional(),
     documents: z
@@ -101,6 +115,8 @@ export const saveDraftSchema = z.object({
         drivingLicense: z.string().optional(),
         vehicleRegistration: z.string().optional(),
         insuranceCertificate: z.string().optional(),
+        profilePhoto: z.string().optional(),
+        vehiclePreviewImage: z.string().optional(),
       })
       .optional(),
   }),
@@ -129,4 +145,17 @@ export const listApplicationsSchema = z.object({
       limit: z.string().optional(),
     })
     .optional(),
+});
+
+export const uploadDocumentSchema = z.object({
+  body: z.object({
+    kind: z.enum([
+      "profilePhoto",
+      "vehiclePreviewImage",
+      "idDocument",
+      "drivingLicense",
+      "vehicleRegistration",
+      "insuranceCertificate",
+    ]),
+  }),
 });

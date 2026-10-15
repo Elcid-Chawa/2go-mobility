@@ -3,6 +3,14 @@ import { DriverOnboardingController } from "./driver-onboarding.controller";
 import { authenticate, requireRoles } from "../../middlewares/auth";
 import { UserRole } from "../../constants/roles";
 import { validate } from "../../middlewares/validate";
+import { requirePermissions } from "../../middlewares/auth";
+import { Permission } from "../../constants/permissions";
+import {
+  uploadOnboardingFile,
+  verifyOnboardingFileContent,
+  isSafeOnboardingFilename,
+} from "./driver-onboarding.upload";
+import { ApiResponse } from "../../utils/apiResponse";
 import {
   personalInfoSchema,
   addressSchema,
@@ -11,6 +19,7 @@ import {
   saveDraftSchema,
   verifyApplicationSchema,
   listApplicationsSchema,
+  uploadDocumentSchema,
 } from "./driver-onboarding.validation";
 
 const router = Router();
@@ -79,23 +88,50 @@ router.post(
   DriverOnboardingController.submitApplication,
 );
 
+router.post(
+  "/files",
+  requireRoles(UserRole.DRIVER),
+  uploadOnboardingFile,
+  verifyOnboardingFileContent,
+  validate(uploadDocumentSchema),
+  DriverOnboardingController.uploadDocument,
+);
+
+router.get(
+  "/files/:filename",
+  requireRoles(
+    UserRole.DRIVER,
+    UserRole.OPERATIONS,
+    UserRole.ADMIN,
+    UserRole.SYSTEM_OWNER,
+  ),
+  (req, res, next) => {
+    if (!isSafeOnboardingFilename(req.params.filename as string)) {
+      ApiResponse.error(res, "Invalid document reference", 400);
+      return;
+    }
+    next();
+  },
+  DriverOnboardingController.getDocument,
+);
+
 // Admin / Operations endpoints
 router.get(
   "/admin/applications",
-  requireRoles(UserRole.OPERATIONS, UserRole.ADMIN),
+  requirePermissions(Permission.DRIVER_VERIFY),
   validate(listApplicationsSchema),
   DriverOnboardingController.listApplications,
 );
 
 router.get(
   "/admin/applications/:id",
-  requireRoles(UserRole.OPERATIONS, UserRole.ADMIN),
+  requirePermissions(Permission.DRIVER_VERIFY),
   DriverOnboardingController.getApplicationById,
 );
 
 router.patch(
   "/admin/applications/:id/verify",
-  requireRoles(UserRole.OPERATIONS, UserRole.ADMIN),
+  requirePermissions(Permission.DRIVER_VERIFY),
   validate(verifyApplicationSchema),
   DriverOnboardingController.verifyApplication,
 );

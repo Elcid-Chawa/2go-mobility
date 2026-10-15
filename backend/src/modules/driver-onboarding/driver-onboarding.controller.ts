@@ -170,10 +170,53 @@ export class DriverOnboardingController {
         req.body.status,
         req.userId!,
         req.body.notes,
+        req.body.rejectionReason,
       );
       ApiResponse.success(res, data, "Onboarding application status updated");
     } catch (error) {
       next(error);
     }
+  }
+
+  static async uploadDocument(
+      req: AuthRequest,
+      res: Response,
+      next: NextFunction,
+    ): Promise<void> {
+      try {
+        const filename = req.file?.filename;
+        if (!filename) {
+          ApiResponse.error(res, "A supported image or document file is required", 400);
+          return;
+        }
+        const data = await DriverOnboardingService.uploadDocument(
+          req.userId!,
+          req.body.kind,
+          filename,
+        );
+        ApiResponse.created(res, data, "Onboarding file uploaded");
+      } catch (error) {
+        next(error);
+      }
+    }
+
+    static async getDocument(
+      req: AuthRequest,
+      res: Response,
+      next: NextFunction,
+    ): Promise<void> {
+      try {
+        const filename = req.params.filename as string;
+        const filePath = await DriverOnboardingService.getDocumentPath(
+          req.userId!,
+          req.userRole!,
+          filename,
+        );
+        res.sendFile(filePath, (error) => {
+          if (error) next(error);
+        });
+      } catch (error) {
+        next(error);
+      }
   }
 }

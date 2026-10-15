@@ -50,7 +50,7 @@ const DriverSchema = new Schema<IDriver>(
     approvalStatus: {
       type: String,
       enum: Object.values(DriverApprovalStatus),
-      default: DriverApprovalStatus.APPROVED, // Auto-approved for MVP
+      default: DriverApprovalStatus.PENDING,
       index: true,
     },
     onlineStatus: {

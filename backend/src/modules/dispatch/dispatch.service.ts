@@ -1,6 +1,7 @@
 import mongoose from "mongoose";
 import { Driver, IDriver } from "../drivers/driver.model";
 import { Trip, ITrip } from "../trips/trip.model";
+import { Vehicle } from "../vehicles/vehicle.model";
 import {
   DriverApprovalStatus,
   DriverAvailabilityStatus,
@@ -31,6 +32,7 @@ export class DispatchService {
       approvalStatus: DriverApprovalStatus.APPROVED,
       onlineStatus: DriverOnlineStatus.ONLINE,
       availabilityStatus: DriverAvailabilityStatus.AVAILABLE,
+      lastLocationUpdate: { $gte: new Date(Date.now() - 2 * 60 * 1000) },
       currentLocation: {
         $near: {
           $geometry: {
@@ -50,8 +52,7 @@ export class DispatchService {
     // Filter by vehicle category if vehicle exists
     return eligibleDrivers.filter((driver) => {
       const vehicle = driver.activeVehicleId as any;
-      if (!vehicle) return true;
-      if (vehicle.status !== "ACTIVE") return false;
+      if (!vehicle || vehicle.status !== "ACTIVE") return false;
       return vehicle.category === category;
     });
   }
@@ -282,8 +283,39 @@ export class DispatchService {
       throw { statusCode: 404, message: "Driver not found" };
     }
 
-    const trip = await Trip.findByIdAndUpdate(
-      tripId,
+    if (
+      driver.approvalStatus !== DriverApprovalStatus.APPROVED ||
+      driver.onlineStatus !== DriverOnlineStatus.ONLINE ||
+      driver.availabilityStatus !== DriverAvailabilityStatus.AVAILABLE ||
+      !driver.activeVehicleId ||
+      !driver.lastLocationUpdate ||
+      driver.lastLocationUpdate.getTime() < Date.now() - 2 * 60 * 1000
+    ) {
+      throw { statusCode: 409, message: "Driver must be approved, online, available, and have a recent location and active vehicle." };
+    }
+
+    const vehicle = await Vehicle.findById(driver.activeVehicleId);
+    if (!vehicle || vehicle.status !== "ACTIVE") {
+      throw { statusCode: 409, message: "Driver does not have an active vehicle." };
+    }
+
+    const tripRecord = await Trip.findOne({ _id: tripId }).select("category status");
+    if (!tripRecord) throw { statusCode: 404, message: "Trip not found" };
+    if (
+      tripRecord.status !== TripStatus.REQUESTED &&
+      tripRecord.status !== TripStatus.SEARCHING_DRIVER
+    ) {
+      throw { statusCode: 409, message: "Only unassigned trips can be manually dispatched." };
+    }
+    if (vehicle.category !== tripRecord.category) {
+      throw { statusCode: 409, message: "Driver vehicle does not match the trip category." };
+    }
+
+    const trip = await Trip.findOneAndUpdate(
+      {
+        _id: tripId,
+        status: { $in: [TripStatus.REQUESTED, TripStatus.SEARCHING_DRIVER] },
+      },
       {
         $set: {
           driverId: driver._id,
@@ -310,6 +342,15 @@ export class DispatchService {
         driverId,
       });
       io.to("operations").emit("trip:assigned", { tripId: trip._id, driverId });
+      const driverUserId = driver.userId.toString();
+      io.to(`user:${driverUserId}`).emit("trip:offer", {
+        tripId: trip._id,
+        pickup: trip.pickup,
+        destination: trip.destination,
+        estimatedFare: trip.estimatedFare,
+        distanceKm: trip.distanceKm,
+        timeoutSeconds: env.DISPATCH_OFFER_TIMEOUT_SECONDS,
+      });
     }
 
     return trip;

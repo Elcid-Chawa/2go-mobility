@@ -15,6 +15,8 @@ export interface IOnboarding extends Document {
     phoneNumber?: string;
     idDocumentType?: string;
     idDocumentNumber?: string;
+    drivingLicenseNumber?: string;
+    drivingLicenseExpiryDate?: Date;
   };
   address: {
     street?: string;
@@ -29,12 +31,22 @@ export interface IOnboarding extends Document {
     year?: number;
     color?: string;
     licensePlate?: string;
+    vin?: string;
+    category?: string;
   };
   documents: {
     idDocument?: string; // URL to document
     drivingLicense?: string; // URL to document
     vehicleRegistration?: string; // URL to document
     insuranceCertificate?: string; // URL to document
+    profilePhoto?: string;
+    vehiclePreviewImage?: string;
+  };
+  review?: {
+    reviewedBy?: mongoose.Types.ObjectId;
+    reviewedAt?: Date;
+    notes?: string;
+    rejectionReason?: string;
   };
   createdAt: Date;
   updatedAt: Date;
@@ -68,6 +80,8 @@ const OnboardingSchema: Schema = new Schema<IOnboarding>(
       phoneNumber: { type: String },
       idDocumentType: { type: String },
       idDocumentNumber: { type: String },
+      drivingLicenseNumber: { type: String },
+      drivingLicenseExpiryDate: { type: Date },
     },
     address: {
       street: { type: String },
@@ -82,12 +96,22 @@ const OnboardingSchema: Schema = new Schema<IOnboarding>(
       year: { type: Number },
       color: { type: String },
       licensePlate: { type: String },
+      vin: { type: String },
+      category: { type: String, enum: ["STANDARD", "COMFORT", "PREMIUM", "XL"], default: "STANDARD" },
     },
     documents: {
       idDocument: { type: String },
       drivingLicense: { type: String },
       vehicleRegistration: { type: String },
       insuranceCertificate: { type: String },
+      profilePhoto: { type: String },
+      vehiclePreviewImage: { type: String },
+    },
+    review: {
+      reviewedBy: { type: Schema.Types.ObjectId, ref: "User" },
+      reviewedAt: { type: Date },
+      notes: { type: String },
+      rejectionReason: { type: String },
     },
   },
   {

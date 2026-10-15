@@ -5,6 +5,7 @@ import {
   DriverOnlineStatus,
 } from "../../constants/tripStatus";
 import { VehicleCategory } from "../../constants/vehicleCategory";
+import { Vehicle, IVehicle } from "../vehicles/vehicle.model";
 
 export class DriverService {
   static async getNearbyDrivers(
@@ -31,7 +32,11 @@ export class DriverService {
     return drivers
       .filter((driver) => {
         const vehicle = driver.activeVehicleId as any;
-        return !category || !vehicle || vehicle.category === category;
+        return Boolean(
+          vehicle &&
+          vehicle.status === "ACTIVE" &&
+          (!category || vehicle.category === category),
+        );
       })
       .map((driver) => {
         const vehicle = driver.activeVehicleId as any;
@@ -67,6 +72,24 @@ export class DriverService {
     const driver = await Driver.findOne({ userId });
     if (!driver) {
       throw { statusCode: 404, message: "Driver not found" };
+    }
+
+    if (
+      data.onlineStatus === DriverOnlineStatus.ONLINE &&
+      driver.approvalStatus !== DriverApprovalStatus.APPROVED
+    ) {
+      throw { statusCode: 403, message: "Your driver account must be approved before going online." };
+    }
+    if (data.onlineStatus === DriverOnlineStatus.ONLINE) {
+      const vehicle = driver.activeVehicleId
+        ? await Vehicle.findOne({
+            _id: driver.activeVehicleId,
+            status: "ACTIVE",
+          })
+        : null;
+      if (!vehicle) {
+        throw { statusCode: 403, message: "An active vehicle must be assigned before going online." };
+      }
     }
 
     if (data.onlineStatus !== undefined) {
