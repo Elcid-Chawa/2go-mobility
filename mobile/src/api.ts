@@ -5,7 +5,7 @@ import { io, Socket } from "socket.io-client";
 
 declare const process: { env: Record<string, string | undefined> };
 
-export type UserRole = "CUSTOMER" | "DRIVER" | "OPERATIONS" | "ADMIN";
+export type UserRole = "CUSTOMER" | "DRIVER" | "OPERATIONS" | "ADMIN" | "RENTAL_PARTNER" | "MOVER_PARTNER";
 export type VehicleCategory = "STANDARD" | "COMFORT" | "PREMIUM" | "XL";
 export type PaymentMethod = "CASH" | "CARD" | "MOBILE_MONEY";
 export type TripStatus =
@@ -97,6 +97,12 @@ export interface Trip {
 
 const API_URL =
   process.env.EXPO_PUBLIC_API_URL || "http://192.168.1.69:5000/api/v1";
+const RENTALS_API_URL =
+  process.env.EXPO_PUBLIC_RENTALS_API_URL ||
+  API_URL.replace(/:\d+\/api\/v1$/, ":5103/api/v1/car-rentals");
+const MOVERS_API_URL =
+  process.env.EXPO_PUBLIC_MOVERS_API_URL ||
+  API_URL.replace(/:\d+\/api\/v1$/, ":5101/api/v1/movers");
 const ACCESS_TOKEN_KEY = "2go.accessToken";
 const REFRESH_TOKEN_KEY = "2go.refreshToken";
 
@@ -109,7 +115,7 @@ async function request<T>(
     ...options,
     headers: {
       "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(token ? { Authorization: "Bearer " + token } : {}),
       ...options.headers,
     },
   });
@@ -127,6 +133,334 @@ async function saveTokens(accessToken: string, refreshToken: string) {
 
 export async function getAccessToken() {
   return SecureStore.getItemAsync(ACCESS_TOKEN_KEY);
+}
+
+export type RentalCategory =
+  | "ECONOMY"
+  | "COMPACT"
+  | "SEDAN"
+  | "SUV"
+  | "LUXURY"
+  | "VAN";
+
+export interface RentalVehicle {
+  _id: string;
+  make: string;
+  model: string;
+  year: number;
+  registrationNumber: string;
+  category: RentalCategory;
+  seats: number;
+  transmission: "AUTOMATIC" | "MANUAL";
+  fuel: "PETROL" | "DIESEL" | "HYBRID" | "ELECTRIC";
+  city: string;
+  description: string;
+  photoUrl?: string;
+  agency: { _id: string; name: string; address: string };
+  rate: {
+    currency: string;
+    hourlyRate: number;
+    dailyRate: number;
+    weeklyRate: number;
+    minimumHours: number;
+    securityDeposit: number;
+    chauffeurDailyRate: number;
+  };
+}
+
+export interface RentalLicense {
+  _id: string;
+  licenseNumber: string;
+  issuingCountry: string;
+  expiresAt: string;
+  status: "PENDING" | "VERIFIED" | "REJECTED";
+  reviewNotes?: string;
+  documentFilename?: string;
+}
+
+export interface RentalBooking {
+  _id: string;
+  vehicleId: RentalVehicle | { _id: string; make: string; model: string; year: number; city: string };
+  agencyId: { _id: string; name: string; phone?: string };
+  driverId?: { _id: string; name: string; phone: string };
+  startAt: string;
+  endAt: string;
+  driverOption: "SELF_DRIVE" | "WITH_DRIVER";
+  billingUnit: "HOURLY" | "DAILY" | "WEEKLY";
+  rentalAmount: number;
+  driverAmount: number;
+  securityDeposit: number;
+  totalDue: number;
+  currency: string;
+  status: "PENDING_AGENCY" | "CONFIRMED" | "DECLINED" | "CANCELLED" | "COMPLETED";
+  paymentStatus: "PENDING" | "PAID" | "FAILED" | "REFUNDED";
+}
+
+export interface RentalQuote {
+  startAt: string;
+  endAt: string;
+  driverOption: "SELF_DRIVE" | "WITH_DRIVER";
+  durationHours: number;
+  billingUnit: "HOURLY" | "DAILY" | "WEEKLY";
+  units: number;
+  unitRate: number;
+  rentalAmount: number;
+  driverAmount: number;
+  securityDeposit: number;
+  totalDue: number;
+  currency: string;
+  vehicle: RentalVehicle;
+  agency: RentalVehicle["agency"];
+}
+
+export type MoverVehicleType = "PICKUP" | "SMALL_VAN" | "MEDIUM_TRUCK" | "LARGE_TRUCK" | "FLATBED";
+export type MoverMoveStatus = "OPEN" | "QUOTED" | "ASSIGNED" | "IN_PROGRESS" | "COMPLETED" | "CANCELLED";
+export interface MoverVehicle {
+  _id: string;
+  make: string;
+  model: string;
+  registrationNumber?: string;
+  vehicleType: MoverVehicleType;
+  capacityKg: number;
+  volumeM3: number;
+  crewCapacity: number;
+  city: string;
+  description?: string;
+  status?: string;
+  agency?: { _id: string; name: string; city: string; description?: string };
+}
+export interface MoverQuote {
+  _id: string;
+  amount: number;
+  currency: string;
+  crewCount: number;
+  message: string;
+  validUntil: string;
+  status: "PROPOSED" | "ACCEPTED" | "DECLINED" | "WITHDRAWN" | "EXPIRED";
+  agencyId: { _id: string; name: string; phone?: string; city?: string };
+  vehicleId: MoverVehicle;
+}
+export interface MoverMove {
+  _id: string;
+  pickupAddress: string;
+  pickupCity: string;
+  destinationAddress: string;
+  destinationCity: string;
+  scheduledAt: string;
+  estimatedDurationHours: number;
+  moveType: "HOUSEHOLD" | "OFFICE" | "SINGLE_ITEM";
+  bedrooms: number;
+  pickupFloor: number;
+  destinationFloor: number;
+  pickupElevator: boolean;
+  destinationElevator: boolean;
+  crewRequired: number;
+  preferredVehicleType?: MoverVehicleType;
+  inventoryNotes?: string;
+  status: MoverMoveStatus;
+  paymentStatus: "PENDING" | "PAID" | "FAILED";
+  quotes?: MoverQuote[];
+  rating?: number;
+  review?: string;
+}
+
+async function moverRequest<T>(path: string, options: RequestInit = {}): Promise<T> {
+  let token = await getAccessToken();
+  if (!token) throw new Error("Sign in to continue.");
+  const send = (accessToken: string) =>
+    fetch(`${MOVERS_API_URL}${path}`, {
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        ...options.headers,
+        Authorization: "Bearer " + accessToken,
+      },
+    });
+  let response = await send(token);
+  if (response.status === 401) {
+    const refreshToken = await SecureStore.getItemAsync(REFRESH_TOKEN_KEY);
+    if (!refreshToken) throw new Error("Your session has expired. Sign in again.");
+    const refreshed = await request<{ accessToken: string; refreshToken: string }>(
+      "/auth/refresh",
+      { method: "POST", body: JSON.stringify({ refreshToken }) },
+    );
+    await saveTokens(refreshed.accessToken, refreshed.refreshToken);
+    token = refreshed.accessToken;
+    response = await send(token);
+  }
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok || body.success === false) {
+    throw new Error(body.message || "The movers request could not be completed.");
+  }
+  return body.data as T;
+}
+
+export async function listMoverVehicles(city = "") {
+  const query = city.trim() ? `?city=${encodeURIComponent(city.trim())}` : "";
+  return moverRequest<MoverVehicle[]>(`/vehicles${query}`);
+}
+
+export async function createMoverRequest(input: Record<string, unknown>) {
+  return moverRequest<MoverMove>("/moves", { method: "POST", body: JSON.stringify(input) });
+}
+
+export async function getMyMoverRequests() {
+  return moverRequest<MoverMove[]>("/moves/me");
+}
+
+export async function acceptMoverQuote(moveId: string, quoteId: string) {
+  return moverRequest<MoverMove>(`/moves/${moveId}/quotes/${quoteId}/accept`, { method: "POST" });
+}
+
+export async function cancelMoverRequest(moveId: string) {
+  return moverRequest<MoverMove>(`/moves/${moveId}/cancel`, { method: "POST" });
+}
+
+export async function reviewMoverService(moveId: string, rating: number, review: string) {
+  return moverRequest<MoverMove>(`/moves/${moveId}/review`, {
+    method: "POST",
+    body: JSON.stringify({ rating, review }),
+  });
+}
+
+async function rentalRequest<T>(
+  path: string,
+  options: RequestInit = {},
+): Promise<T> {
+  let token = await getAccessToken();
+  if (!token) throw new Error("Sign in to continue.");
+  const send = (accessToken: string) =>
+    fetch(`${RENTALS_API_URL}${path}`, {
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        ...options.headers,
+        Authorization: "Bearer " + token,
+      },
+    });
+  let response = await send(token);
+  if (response.status === 401) {
+    const refreshToken = await SecureStore.getItemAsync(REFRESH_TOKEN_KEY);
+    if (!refreshToken) throw new Error("Your session has expired. Sign in again.");
+    const refreshed = await request<{ accessToken: string; refreshToken: string }>(
+      "/auth/refresh",
+      { method: "POST", body: JSON.stringify({ refreshToken }) },
+    );
+    await saveTokens(refreshed.accessToken, refreshed.refreshToken);
+    token = refreshed.accessToken;
+    response = await send(token);
+  }
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok || body.success === false) {
+    throw new Error(body.message || "The rental request could not be completed.");
+  }
+  return body.data as T;
+}
+
+export async function listRentalVehicles(input: { city?: string; category?: RentalCategory } = {}) {
+  const query = new URLSearchParams();
+  if (input.city?.trim()) query.set("city", input.city.trim());
+  if (input.category) query.set("category", input.category);
+  const suffix = query.toString() ? `?${query.toString()}` : "";
+  return rentalRequest<RentalVehicle[]>(`/vehicles${suffix}`);
+}
+
+export async function getRentalLicense() {
+  return rentalRequest<RentalLicense | null>("/licenses/me");
+}
+
+export async function submitRentalLicense(input: {
+  licenseNumber: string;
+  issuingCountry: string;
+  expiresAt: string;
+}) {
+  return rentalRequest<RentalLicense>("/licenses/me", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export async function uploadRentalLicenseDocument(asset: {
+  uri: string;
+  name: string;
+  mimeType?: string | null;
+  file?: Blob;
+}) {
+  const token = await getAccessToken();
+  if (!token) throw new Error("Sign in to upload your driving licence.");
+  if (Platform.OS !== "web") {
+    const result = await new ExpoFile(asset.uri).upload(
+      `${RENTALS_API_URL}/licenses/me/document`,
+      {
+        uploadType: UploadType.MULTIPART,
+        fieldName: "file",
+        mimeType: asset.mimeType || "application/octet-stream",
+        headers: { Authorization: "Bearer " + token },
+      },
+    );
+    let body: { success?: boolean; message?: string; data?: RentalLicense };
+    try {
+      body = JSON.parse(result.body) as { success?: boolean; message?: string; data?: RentalLicense };
+    } catch {
+      throw new Error("The rental service returned an invalid upload response.");
+    }
+    if (result.status < 200 || result.status >= 300 || body.success === false || !body.data) {
+      throw new Error(body.message || "Unable to upload the driving licence document.");
+    }
+    return body.data;
+  }
+  if (!asset.file) throw new Error("The selected file is unavailable. Please choose it again.");
+  const formData = new FormData();
+  formData.append("file", asset.file, asset.name);
+  const response = await fetch(`${RENTALS_API_URL}/licenses/me/document`, {
+    method: "POST",
+    headers: { Authorization: "Bearer " + token },
+    body: formData,
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok || body.success === false) {
+    throw new Error(body.message || "Unable to upload the driving licence document.");
+  }
+  return body.data as RentalLicense;
+}
+
+export async function quoteRental(input: {
+  vehicleId: string;
+  startAt: string;
+  endAt: string;
+  driverOption: "SELF_DRIVE" | "WITH_DRIVER";
+}) {
+  return rentalRequest<RentalQuote>("/quotes", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export async function createRentalBooking(input: {
+  vehicleId: string;
+  startAt: string;
+  endAt: string;
+  driverOption: "SELF_DRIVE" | "WITH_DRIVER";
+  expectedRentalAmount: number;
+  expectedDriverAmount: number;
+  expectedSecurityDeposit: number;
+  expectedTotalDue: number;
+  expectedCurrency: string;
+}) {
+  return rentalRequest<RentalBooking>("/bookings", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export async function cancelRentalBooking(bookingId: string) {
+  return rentalRequest<RentalBooking>(`/bookings/${bookingId}/cancel`, {
+    method: "POST",
+  });
+}
+
+export async function getMyRentalBookings() {
+  return rentalRequest<RentalBooking[]>("/bookings/me");
 }
 
 export async function login(email: string, password: string) {
@@ -468,7 +802,7 @@ export async function uploadDriverOnboardingFile(
         uploadType: UploadType.MULTIPART,
         fieldName: "file",
         mimeType: asset.mimeType || "application/octet-stream",
-        headers: { Authorization: `Bearer ${token}` },
+      headers: { Authorization: "Bearer " + token },
         parameters: { kind },
       },
     );
@@ -492,7 +826,7 @@ export async function uploadDriverOnboardingFile(
   formData.append("file", asset.file, asset.name);
   const response = await fetch(`${API_URL}/driver-onboarding/files`, {
     method: "POST",
-    headers: { Authorization: `Bearer ${token}` },
+      headers: { Authorization: "Bearer " + token },
     body: formData,
   });
   const body = await response.json().catch(() => ({}));

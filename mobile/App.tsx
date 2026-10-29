@@ -57,7 +57,7 @@ function AppContent() {
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      <StatusBar barStyle="light-content" backgroundColor="#0e1519" />
+      <StatusBar barStyle="light-content" />
 
       {user.role === "DRIVER" && <View style={styles.sessionBar}>
         <Text style={styles.sessionName}>2Go</Text>
