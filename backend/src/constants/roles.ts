@@ -7,6 +7,8 @@ export enum UserRole {
   AGENT = 'AGENT',
   DISPATCHER = 'DISPATCHER',
   VIEWER = 'VIEWER',
+  RENTAL_PARTNER = 'RENTAL_PARTNER',
+  MOVER_PARTNER = 'MOVER_PARTNER',
 }
 
 export enum UserStatus {

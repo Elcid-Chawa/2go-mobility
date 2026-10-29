@@ -69,7 +69,12 @@ export class AuthService {
     const passwordHash = await bcrypt.hash(dto.password, salt);
 
     const userRole = dto.role || UserRole.CUSTOMER;
-    if (userRole !== UserRole.CUSTOMER && userRole !== UserRole.DRIVER) {
+    if (
+      userRole !== UserRole.CUSTOMER &&
+      userRole !== UserRole.DRIVER &&
+      userRole !== UserRole.RENTAL_PARTNER &&
+      userRole !== UserRole.MOVER_PARTNER
+    ) {
       throw { statusCode: 403, message: "Operational accounts must be created by an administrator." };
     }
 

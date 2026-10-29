@@ -7,6 +7,10 @@ export enum Permission {
   FLEET_MANAGE = 'FLEET_MANAGE',
   USER_MANAGE = 'USER_MANAGE',
   ADMIN_SETTINGS = 'ADMIN_SETTINGS',
+  RENTAL_MANAGE = 'RENTAL_MANAGE',
+  RENTAL_REVIEW = 'RENTAL_REVIEW',
+  MOVER_MANAGE = 'MOVER_MANAGE',
+  MOVER_REVIEW = 'MOVER_REVIEW',
 }
 
 export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
@@ -18,6 +22,10 @@ export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     Permission.DISPATCH_EXECUTE,
     Permission.FLEET_MANAGE,
     Permission.USER_MANAGE,
+    Permission.RENTAL_MANAGE,
+    Permission.RENTAL_REVIEW,
+    Permission.MOVER_MANAGE,
+    Permission.MOVER_REVIEW,
   ],
   [UserRole.DISPATCHER]: [
     Permission.VIEW_OPERATIONS,
@@ -25,6 +33,8 @@ export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
   ],
   [UserRole.AGENT]: [Permission.VIEW_OPERATIONS],
   [UserRole.VIEWER]: [Permission.VIEW_OPERATIONS],
+  [UserRole.RENTAL_PARTNER]: [Permission.RENTAL_MANAGE],
+  [UserRole.MOVER_PARTNER]: [Permission.MOVER_MANAGE],
   [UserRole.CUSTOMER]: [],
   [UserRole.DRIVER]: [],
 };
