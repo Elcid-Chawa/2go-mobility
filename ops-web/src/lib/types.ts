@@ -7,6 +7,8 @@ export enum UserRole {
   VIEWER = "VIEWER",
   CUSTOMER = "CUSTOMER",
   DRIVER = "DRIVER",
+  RENTAL_PARTNER = "RENTAL_PARTNER",
+  MOVER_PARTNER = "MOVER_PARTNER",
 }
 
 export enum Permission {
@@ -16,6 +18,10 @@ export enum Permission {
   VIEW_OPERATIONS = "VIEW_OPERATIONS",
   ADMIN_SETTINGS = "ADMIN_SETTINGS",
   USER_MANAGE = "USER_MANAGE",
+  RENTAL_MANAGE = "RENTAL_MANAGE",
+  RENTAL_REVIEW = "RENTAL_REVIEW",
+  MOVER_MANAGE = "MOVER_MANAGE",
+  MOVER_REVIEW = "MOVER_REVIEW",
 }
 
 export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
@@ -26,6 +32,10 @@ export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     Permission.VIEW_OPERATIONS,
     Permission.ADMIN_SETTINGS,
     Permission.USER_MANAGE,
+    Permission.RENTAL_MANAGE,
+    Permission.RENTAL_REVIEW,
+    Permission.MOVER_MANAGE,
+    Permission.MOVER_REVIEW,
   ],
   [UserRole.SYSTEM_OWNER]: [
     Permission.DRIVER_VERIFY,
@@ -34,6 +44,10 @@ export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     Permission.VIEW_OPERATIONS,
     Permission.ADMIN_SETTINGS,
     Permission.USER_MANAGE,
+    Permission.RENTAL_MANAGE,
+    Permission.RENTAL_REVIEW,
+    Permission.MOVER_MANAGE,
+    Permission.MOVER_REVIEW,
   ],
   [UserRole.OPERATIONS]: [
     Permission.DRIVER_VERIFY,
@@ -41,6 +55,10 @@ export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     Permission.FLEET_MANAGE,
     Permission.VIEW_OPERATIONS,
     Permission.USER_MANAGE,
+    Permission.RENTAL_MANAGE,
+    Permission.RENTAL_REVIEW,
+    Permission.MOVER_MANAGE,
+    Permission.MOVER_REVIEW,
   ],
   [UserRole.DISPATCHER]: [
     Permission.DISPATCH_EXECUTE,
@@ -50,6 +68,8 @@ export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
   [UserRole.AGENT]: [Permission.VIEW_OPERATIONS],
   [UserRole.CUSTOMER]: [],
   [UserRole.DRIVER]: [],
+  [UserRole.RENTAL_PARTNER]: [Permission.RENTAL_MANAGE],
+  [UserRole.MOVER_PARTNER]: [Permission.MOVER_MANAGE],
 };
 
 export const ROLE_LABELS: Record<
@@ -99,6 +119,16 @@ export const ROLE_LABELS: Record<
     label: "Driver",
     description: "Driver account with no Operations console access",
     color: "bg-slate-500/10 text-slate-400 border-slate-500/30",
+  },
+  [UserRole.RENTAL_PARTNER]: {
+    label: "Rental Agency Partner",
+    description: "Manage your own rental inventory, drivers, rates, and bookings",
+    color: "bg-cyan-500/10 text-cyan-300 border-cyan-500/30",
+  },
+  [UserRole.MOVER_PARTNER]: {
+    label: "Moving Agency Partner",
+    description: "Manage your moving fleet, quote requests, and accepted moves",
+    color: "bg-orange-500/10 text-orange-300 border-orange-500/30",
   },
 };
 

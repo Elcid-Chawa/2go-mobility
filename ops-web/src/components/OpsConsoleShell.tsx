@@ -10,6 +10,8 @@ import {
   Radio,
   UserCheck,
   Users,
+  KeyRound,
+  Truck,
   LogOut,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
@@ -24,6 +26,20 @@ export function OpsConsoleShell({ children }: { children: React.ReactNode }) {
   const [isSigningIn, setIsSigningIn] = useState(false);
 
   const navItems = [
+    {
+      label: role === "MOVER_PARTNER" ? "My Moving Agency" : "Movers",
+      href: "/movers",
+      icon: Truck,
+      color: "text-orange-400",
+      permission: Permission.MOVER_MANAGE,
+    },
+    {
+      label: role === "RENTAL_PARTNER" ? "My Rental Agency" : "Auto Rentals",
+      href: "/rentals",
+      icon: KeyRound,
+      color: "text-cyan-400",
+      permission: Permission.RENTAL_MANAGE,
+    },
     {
       label: "Dashboard & KPIs",
       href: "/dashboard",
@@ -75,7 +91,7 @@ export function OpsConsoleShell({ children }: { children: React.ReactNode }) {
     },
   ];
 
-  if (pathname === "/") {
+  if (pathname === "/" || pathname === "/rentals/apply" || pathname === "/movers/apply") {
     return <>{children}</>;
   }
 
@@ -152,6 +168,12 @@ export function OpsConsoleShell({ children }: { children: React.ReactNode }) {
           <p className="mt-4 text-xs leading-5 text-slate-500">
             Identity and permissions are checked by the main 2GO backend.
           </p>
+          <Link
+            href="/rentals/apply"
+            className="mt-3 inline-block text-xs font-bold text-cyan-300 hover:text-cyan-200"
+          >
+            Apply to list a rental agency
+          </Link>
         </form>
       </div>
     );

@@ -1,5 +1,11 @@
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/api/v1";
+const RENTALS_API_URL =
+  process.env.NEXT_PUBLIC_RENTALS_API_URL ||
+  "http://localhost:5103/api/v1/car-rentals";
+const MOVERS_API_URL =
+  process.env.NEXT_PUBLIC_MOVERS_API_URL ||
+  "http://localhost:5101/api/v1/movers";
 const ACCESS_TOKEN_KEY = "2go.ops.accessToken";
 const REFRESH_TOKEN_KEY = "2go.ops.refreshToken";
 
@@ -36,6 +42,24 @@ function storeTokens(accessToken: string, refreshToken: string): void {
 
 export function getAccessToken(): string | null {
   return getStoredTokens().accessToken;
+}
+
+export async function registerRequest(input: {
+  name: string;
+  email: string;
+  phone: string;
+  password: string;
+  role: "RENTAL_PARTNER" | "MOVER_PARTNER";
+}): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/auth/register`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const result = await decodeResponse<{
+    tokens: { accessToken: string; refreshToken: string };
+  }>(response);
+  storeTokens(result.tokens.accessToken, result.tokens.refreshToken);
 }
 
 export async function loginRequest(
@@ -87,10 +111,115 @@ export async function apiRequest<T>(
       headers: {
         "Content-Type": "application/json",
         ...options.headers,
-        Authorization: `Bearer ${token}`,
+        Authorization: "Bearer " + token,
       },
     });
 
+  let response = await send(accessToken);
+  if (response.status === 401) {
+    try {
+      response = await send(await refreshAccessToken());
+    } catch (error) {
+      sessionStorage.removeItem(ACCESS_TOKEN_KEY);
+      sessionStorage.removeItem(REFRESH_TOKEN_KEY);
+      throw error;
+    }
+  }
+  return decodeResponse<T>(response);
+}
+
+export async function rentalRequest<T>(
+  path: string,
+  options: RequestInit = {},
+): Promise<T> {
+  const accessToken = getAccessToken();
+  if (!accessToken) throw new Error("Sign in to continue.");
+  const send = (token: string) =>
+    fetch(`${RENTALS_API_URL}${path}`, {
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        ...options.headers,
+        Authorization: "Bearer " + token,
+      },
+    });
+
+  let response = await send(accessToken);
+  if (response.status === 401) {
+    try {
+      response = await send(await refreshAccessToken());
+    } catch (error) {
+      sessionStorage.removeItem(ACCESS_TOKEN_KEY);
+      sessionStorage.removeItem(REFRESH_TOKEN_KEY);
+      throw error;
+    }
+  }
+  return decodeResponse<T>(response);
+}
+
+export async function moverRequest<T>(
+  path: string,
+  options: RequestInit = {},
+): Promise<T> {
+  const accessToken = getAccessToken();
+  if (!accessToken) throw new Error("Sign in to continue.");
+  const send = (token: string) =>
+    fetch(`${MOVERS_API_URL}${path}`, {
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        ...options.headers,
+        Authorization: "Bearer " + token,
+      },
+    });
+  let response = await send(accessToken);
+  if (response.status === 401) {
+    try {
+      response = await send(await refreshAccessToken());
+    } catch (error) {
+      sessionStorage.removeItem(ACCESS_TOKEN_KEY);
+      sessionStorage.removeItem(REFRESH_TOKEN_KEY);
+      throw error;
+    }
+  }
+  return decodeResponse<T>(response);
+}
+
+export async function rentalFile(path: string): Promise<string> {
+  const accessToken = getAccessToken();
+  if (!accessToken) throw new Error("Sign in to continue.");
+  const send = (token: string) =>
+    fetch(`${RENTALS_API_URL}${path}`, {
+      headers: { Authorization: "Bearer " + token },
+    });
+  let response = await send(accessToken);
+  if (response.status === 401) {
+    try {
+      response = await send(await refreshAccessToken());
+    } catch (error) {
+      sessionStorage.removeItem(ACCESS_TOKEN_KEY);
+      sessionStorage.removeItem(REFRESH_TOKEN_KEY);
+      throw error;
+    }
+  }
+  if (!response.ok) {
+    const body = (await response.json().catch(() => ({}))) as { message?: string };
+    throw new Error(body.message || "Unable to retrieve the rental document.");
+  }
+  return URL.createObjectURL(await response.blob());
+}
+
+export async function rentalUpload<T>(path: string, file: File): Promise<T> {
+  const accessToken = getAccessToken();
+  if (!accessToken) throw new Error("Sign in to continue.");
+  const formData = new FormData();
+  formData.append("file", file);
+  const send = (token: string) =>
+    fetch(`${RENTALS_API_URL}${path}`, {
+      method: "POST",
+      headers: { Authorization: "Bearer " + token },
+      body: formData,
+    });
   let response = await send(accessToken);
   if (response.status === 401) {
     try {
@@ -110,7 +239,7 @@ export async function apiFile(path: string): Promise<string> {
 
   const send = (token: string) =>
     fetch(`${API_BASE_URL}${path}`, {
-      headers: { Authorization: `Bearer ${token}` },
+      headers: { Authorization: "Bearer " + token },
     });
   let response = await send(accessToken);
   if (response.status === 401) {

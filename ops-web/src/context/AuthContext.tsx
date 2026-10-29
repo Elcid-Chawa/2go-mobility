@@ -49,6 +49,8 @@ function toOperationsUser(user: MeResponse["user"]): AuthUser {
     UserRole.AGENT,
     UserRole.DISPATCHER,
     UserRole.VIEWER,
+    UserRole.RENTAL_PARTNER,
+    UserRole.MOVER_PARTNER,
   ];
   if (!staffRoles.includes(user.role as UserRole)) {
     throw new Error("An Operations account is required.");
