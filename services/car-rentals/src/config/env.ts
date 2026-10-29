@@ -13,4 +13,12 @@ export const env = {
   PORT: port,
   MONGODB_URI:
     process.env.MONGODB_URI || "mongodb://localhost:27017/2go_car_rentals",
+  UPLOAD_DIR: process.env.UPLOAD_DIR || path.resolve(process.cwd(), "uploads"),
+  RENTAL_DOCUMENT_ENCRYPTION_KEY: process.env.RENTAL_DOCUMENT_ENCRYPTION_KEY || "",
+  AUTH_API_URL:
+    process.env.AUTH_API_URL || "http://localhost:5000/api/v1",
+  CORS_ORIGINS: (process.env.CORS_ORIGINS || "http://localhost:3000")
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean),
 };
