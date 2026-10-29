@@ -47,14 +47,14 @@ const services: {
     title: "Relocation",
     description: "Plan a move with the right-sized crew.",
     icon: "⇧",
-    label: "COMING SOON",
+    label: "BOOK NOW",
   },
   {
     key: "rentals",
     title: "Auto Rentals",
     description: "Find a vehicle for your next journey.",
     icon: "⌑",
-    label: "COMING SOON",
+    label: "BOOK NOW",
   },
 ];
 
@@ -85,6 +85,8 @@ export function ServicesHomeScreen({
   currentLocation,
   activeTrip,
   onSelectRide,
+  onSelectRentals,
+  onSelectMovers,
   onSelectActivity,
   onSelectAccount,
 }: {
@@ -92,6 +94,8 @@ export function ServicesHomeScreen({
   currentLocation: MapCoordinate | null;
   activeTrip: Trip | null;
   onSelectRide: () => void;
+  onSelectRentals: () => void;
+  onSelectMovers: () => void;
   onSelectActivity: () => void;
   onSelectAccount: () => void;
 }) {
@@ -105,6 +109,14 @@ export function ServicesHomeScreen({
   function selectService(key: ServiceKey) {
     if (key === "rides") {
       onSelectRide();
+      return;
+    }
+    if (key === "rentals") {
+      onSelectRentals();
+      return;
+    }
+    if (key === "movers") {
+      onSelectMovers();
       return;
     }
     Alert.alert(
@@ -200,7 +212,7 @@ export function ServicesHomeScreen({
 
         <View style={styles.sectionHeading}>
           <Text style={styles.sectionTitle}>Urban Hub Services</Text>
-          <Text style={styles.availability}>1 LIVE · 4 COMING SOON</Text>
+          <Text style={styles.availability}>3 AVAILABLE · 2 COMING SOON</Text>
         </View>
 
         <TouchableOpacity
@@ -232,7 +244,7 @@ export function ServicesHomeScreen({
             <TouchableOpacity
               key={service.key}
               accessibilityRole="button"
-              accessibilityLabel={`${service.title}, coming soon`}
+              accessibilityLabel={`${service.title}, ${service.label.toLowerCase()}`}
               onPress={() => selectService(service.key)}
               style={styles.serviceCard}
             >
@@ -240,7 +252,7 @@ export function ServicesHomeScreen({
                 <View style={styles.serviceIcon}>
                   <Text style={styles.serviceGlyph}>{service.icon}</Text>
                 </View>
-                <Text style={styles.comingSoon}>{service.label}</Text>
+                <Text style={[styles.comingSoon, service.key === "rentals" && styles.availableLabel]}>{service.label}</Text>
               </View>
               <Text style={styles.serviceTitle}>{service.title}</Text>
               <Text style={styles.serviceDescription} numberOfLines={2}>
@@ -261,8 +273,7 @@ export function ServicesHomeScreen({
           <View style={styles.infoCopy}>
             <Text style={styles.infoTitle}>More ways to go, all in one app</Text>
             <Text style={styles.infoDescription}>
-              We’re building delivery, shopping, relocation and rental services
-              for 2Go.
+              Book rides, plan a relocation, or find a rental vehicle with 2Go.
             </Text>
           </View>
         </View>
@@ -495,6 +506,7 @@ const styles = StyleSheet.create({
     fontSize: 7,
     fontWeight: "900",
   },
+  availableLabel: { color: palette.background, backgroundColor: palette.cyan },
   serviceTitle: { color: palette.text, fontSize: 15, fontWeight: "800" },
   serviceDescription: {
     color: "#c0cbd0",

@@ -1,15 +1,22 @@
 import { CarIcon, PersonCard, RouteCard, ui } from "../design";
 import { ServicesHomeScreen } from "./ServicesHomeScreen";
+import { RentalsHomeScreen } from "./RentalsHomeScreen";
+import { MoversHomeScreen } from "./MoversHomeScreen";
 import { TripChatPanel } from "../components/TripChatPanel";
 import React, { useEffect, useRef, useState } from "react";
 import {
   Alert,
+  Keyboard,
+  Platform,
   StyleSheet,
   Text,
   View,
   TouchableOpacity,
   ScrollView,
   TextInput,
+  type ScrollViewInstance,
+  type TextInputInstance,
+  useWindowDimensions,
 } from "react-native";
 import MapView, { Marker, Polyline, UrlTile } from "react-native-maps";
 import * as Location from "expo-location";
@@ -62,6 +69,7 @@ function MapSurface({
   nearbyDrivers,
   assignedDriverLocation,
   onMapPress,
+  fullScreen = false,
 }: {
   pickup: MapCoordinate | null;
   destination: MapCoordinate | null;
@@ -69,15 +77,16 @@ function MapSurface({
   nearbyDrivers: NearbyDriver[];
   assignedDriverLocation: MapCoordinate | null;
   onMapPress?: (coordinate: MapCoordinate) => void;
+  fullScreen?: boolean;
 }) {
   const mapRef = useRef<MapView>(null);
   const mapCenter = pickup || destination || DEFAULT_PICKUP;
   return (
-    <View style={styles.mapContainer}>
+    <View style={fullScreen ? styles.fullScreenMap : styles.mapContainer}>
       <MapView
         ref={mapRef}
         userInterfaceStyle="dark"
-        style={styles.map}
+        style={fullScreen ? styles.fullScreenMap : styles.map}
         region={{
           latitude: mapCenter.latitude,
           longitude: mapCenter.longitude,
@@ -151,8 +160,10 @@ export function CustomerHomeScreen({
   onUserUpdated: (updates: Pick<AuthUser, "name" | "phone">) => void;
   onSignOut: () => void;
 }) {
+  const { height: windowHeight } = useWindowDimensions();
   const userName = user.name;
-  const [activeTab, setActiveTab] = useState<"Services" | "Rides" | "Activity" | "Account">("Services");
+  const [activeTab, setActiveTab] = useState<"Services" | "Rides" | "Rentals" | "Movers" | "Activity" | "Account">("Services");
+  const tabScrollRef = useRef<ScrollViewInstance>(null);
   const [history, setHistory] = useState<Trip[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [profile, setProfile] = useState<CustomerProfile | null>(null);
@@ -160,7 +171,7 @@ export function CustomerHomeScreen({
   const [profilePhone, setProfilePhone] = useState(user.phone);
   const [profileSaving, setProfileSaving] = useState(false);
   const [pickup, setPickup] = useState("Kyeshero, Goma");
-  const [destination, setDestination] = useState("Katindo, Goma");
+  const [destination, setDestination] = useState("");
   const [category, setCategory] = useState<VehicleCategory>("STANDARD");
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("CASH");
   const [tripState, setTripState] = useState<
@@ -169,6 +180,8 @@ export function CustomerHomeScreen({
   const [rating, setRating] = useState<number>(5);
   const [estimates, setEstimates] = useState<Partial<Record<VehicleCategory, FareEstimate>>>({});
   const estimate = estimates[category] ?? null;
+  const [showRideOptions, setShowRideOptions] = useState(false);
+  const [isEditingLocations, setIsEditingLocations] = useState(false);
   const [trip, setTrip] = useState<Trip | null>(null);
   const [error, setError] = useState("");
   const [currentLocation, setCurrentLocation] = useState<MapCoordinate | null>(
@@ -192,8 +205,26 @@ export function CustomerHomeScreen({
   const [activeLocationField, setActiveLocationField] = useState<
     "pickup" | "destination" | null
   >(null);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const pickupInputRef = useRef<TextInputInstance>(null);
+  const destinationInputRef = useRef<TextInputInstance>(null);
   const [suggestions, setSuggestions] = useState<LocationSuggestion[]>([]);
   const [isFinishing, setIsFinishing] = useState(false);
+
+  useEffect(() => {
+    const showEvent = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
+    const hideEvent = Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
+    const showSubscription = Keyboard.addListener(showEvent, (event) => {
+      setKeyboardHeight(event.endCoordinates.height);
+    });
+    const hideSubscription = Keyboard.addListener(hideEvent, () => {
+      setKeyboardHeight(0);
+    });
+    return () => {
+      showSubscription.remove();
+      hideSubscription.remove();
+    };
+  }, []);
 
   async function loadHistory() {
     setHistoryLoading(true);
@@ -207,6 +238,7 @@ export function CustomerHomeScreen({
   }
 
   useEffect(() => {
+    tabScrollRef.current?.scrollTo({ y: 0, animated: false });
     if (activeTab === "Activity") loadHistory();
     if (activeTab === "Account" && !profile) {
       getCustomerProfile()
@@ -241,6 +273,8 @@ export function CustomerHomeScreen({
     setDestination(previousTrip.destination.address);
     setDestinationLocation({ latitude: destinationLatitude, longitude: destinationLongitude });
     setCategory(previousTrip.category);
+    setShowRideOptions(false);
+    setIsEditingLocations(false);
     setUsingCurrentPickup(false);
     setActiveTab("Rides");
   }
@@ -261,6 +295,8 @@ export function CustomerHomeScreen({
     setTripState("IDLE");
     setTrip(null);
     setAssignedDriverLocation(null);
+    setShowRideOptions(false);
+    setIsEditingLocations(false);
   }
 
   function confirmCancelTrip() {
@@ -535,6 +571,7 @@ export function CustomerHomeScreen({
   }
 
   function selectSuggestion(suggestion: LocationSuggestion) {
+    setShowRideOptions(false);
     if (activeLocationField === "pickup") {
       setPickup(suggestion.label);
       setPickupLocation(suggestion.coordinate);
@@ -545,11 +582,15 @@ export function CustomerHomeScreen({
     }
     setSuggestions([]);
     setActiveLocationField(null);
+    Keyboard.dismiss();
   }
 
   async function selectMapLocation(coordinate: MapCoordinate) {
     try {
       const address = await reverseGeocode(coordinate);
+      setShowRideOptions(false);
+      setActiveLocationField(null);
+      Keyboard.dismiss();
       if (locationMode === "pickup") {
         setPickup(address);
         setPickupLocation(coordinate);
@@ -576,6 +617,8 @@ export function CustomerHomeScreen({
       setTripState("IDLE");
       setTrip(null);
       setRating(5);
+      setShowRideOptions(false);
+      setIsEditingLocations(false);
     } catch (finishError) {
       setError(
         finishError instanceof Error
@@ -587,10 +630,51 @@ export function CustomerHomeScreen({
     }
   }
 
+  const rideSheetStyle = [
+    styles.rideSheet,
+    {
+      maxHeight:
+        keyboardHeight > 0
+          ? Math.min(
+              windowHeight * 0.58,
+              Math.max(180, windowHeight - keyboardHeight - 150),
+            )
+          : windowHeight * 0.58,
+      bottom: isEditingLocations
+        ? keyboardHeight
+          ? Platform.OS === "ios"
+            ? keyboardHeight + 12
+            : 12
+          : 84
+        : 84,
+    },
+  ];
+  const locationEditorStyle = [
+    styles.locationEditorSheet,
+    {
+      bottom: keyboardHeight
+        ? Platform.OS === "ios"
+          ? keyboardHeight + 12
+          : 12
+        : 84,
+      maxHeight:
+        keyboardHeight > 0
+          ? Math.min(
+              windowHeight * 0.52,
+              Math.max(200, windowHeight - keyboardHeight - 130),
+            )
+          : windowHeight * 0.52,
+    },
+  ];
+
   return (
     <View style={styles.screen}>
       <ScrollView
-        contentContainerStyle={styles.content}
+        ref={tabScrollRef}
+        contentContainerStyle={
+          activeTab === "Rides" || activeTab === "Rentals" || activeTab === "Movers" ? styles.rideContent : styles.content
+        }
+        scrollEnabled={activeTab !== "Rides" && activeTab !== "Rentals" && activeTab !== "Movers"}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
@@ -600,84 +684,15 @@ export function CustomerHomeScreen({
             currentLocation={currentLocation}
             activeTrip={trip}
             onSelectRide={() => setActiveTab("Rides")}
+            onSelectRentals={() => setActiveTab("Rentals")}
+            onSelectMovers={() => setActiveTab("Movers")}
             onSelectActivity={() => setActiveTab("Activity")}
             onSelectAccount={() => setActiveTab("Account")}
           />
         )}
-        {activeTab === "Rides" && <>
-        {tripState === "IDLE" && <View style={{position: "absolute", top: 12, left: 16, right: 16, zIndex: 5}}>
-            <View style={styles.searchBox}>
-              <View style={styles.searchRail}>
-                <View style={styles.greenDot} />
-                <View style={styles.railLine} />
-                <View style={styles.blueDot} />
-              </View>
-              <View style={styles.searchFields}>
-                <TextInput
-                  style={styles.locationInput}
-                  accessibilityLabel="Pickup location" value={pickup}
-                  onFocus={() => {
-                    setLocationMode("pickup");
-                    setActiveLocationField("pickup");
-                  }}
-                  onChangeText={(value) => {
-                    setUsingCurrentPickup(false);
-                    setPickup(value);
-                    setPickupLocation(null);
-                  }}
-                  placeholder="Pickup location"
-                  placeholderTextColor={colors.muted}
-                />
-                <View style={styles.fieldDivider} />
-                <TextInput
-                  style={styles.locationInput}
-                  accessibilityLabel="Destination" value={destination}
-                  onFocus={() => {
-                    setLocationMode("destination");
-                    setActiveLocationField("destination");
-                  }}
-                  onChangeText={(value) => {
-                    setDestination(value);
-                    setDestinationLocation(null);
-                  }}
-                  placeholder="Where to?"
-                  placeholderTextColor={colors.muted}
-                />
-              </View>
-            </View>
-            {suggestions.length > 0 && (
-              <View style={styles.suggestions}>
-                {suggestions.map((suggestion) => (
-                  <TouchableOpacity
-                    key={suggestion.id}
-                    style={styles.suggestion}
-                    onPress={() => selectSuggestion(suggestion)}
-                  >
-                    <Text style={styles.suggestionText}>
-                      {suggestion.label}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            )}
-            <View style={styles.mapModeRow}>
-              <Text style={styles.sectionLabel}>Tap map to set</Text>
-              {(["pickup", "destination"] as const).map((mode) => (
-                <TouchableOpacity
-                  key={mode}
-                  onPress={() => setLocationMode(mode)}
-                  style={[
-                    styles.mapMode,
-                    locationMode === mode && styles.mapModeActive,
-                  ]}
-                >
-                  <Text style={styles.mapModeText}>
-                    {mode === "pickup" ? "Pickup" : "Drop-off"}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-</View>}
+        {activeTab === "Rentals" && <RentalsHomeScreen />}
+        {activeTab === "Movers" && <MoversHomeScreen user={user} />}
+        {activeTab === "Rides" && <View style={styles.rideScreen}>
         <MapSurface
           pickup={pickupLocation || currentLocation}
           destination={destinationLocation}
@@ -685,38 +700,224 @@ export function CustomerHomeScreen({
           nearbyDrivers={nearbyDrivers}
           assignedDriverLocation={assignedDriverLocation}
           onMapPress={tripState === "IDLE" ? selectMapLocation : undefined}
+          fullScreen
         />
 
-        {tripState === "IDLE" && (
-          <View style={styles.sheet}>
-            <View style={styles.sheetHandle} />
-            <View style={styles.sheetHeading}>
-              <Text style={styles.sheetTitle}>Choose a Ride</Text>
-              <Text style={styles.nearbyLabel}>
-                {nearbyDrivers.length} nearby
-              </Text>
+        {tripState === "IDLE" && !isEditingLocations && !showRideOptions && (
+          <TouchableOpacity
+            style={styles.rideSearchPrompt}
+            accessibilityRole="button"
+            accessibilityLabel="Enter pickup and destination"
+            onPress={() => setIsEditingLocations(true)}
+          >
+            <Text style={styles.promptEyebrow}>PICKUP</Text>
+            <Text style={styles.promptPickup} numberOfLines={1}>
+              {pickupLocation ? pickup : "Use your current location"}
+            </Text>
+            <View style={styles.promptDivider} />
+            <Text style={styles.promptDestinationLabel}>WHERE TO?</Text>
+            <Text style={styles.promptDestination} numberOfLines={1}>
+              {destinationLocation ? destination : "Enter your destination"}
+            </Text>
+            <View style={styles.promptArrow}>
+              <Text style={styles.promptArrowText}>›</Text>
+            </View>
+          </TouchableOpacity>
+        )}
+
+        {tripState === "IDLE" && isEditingLocations && (
+          <ScrollView
+            style={locationEditorStyle}
+            contentContainerStyle={styles.locationEditorContent}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+          >
+            <View style={styles.editorHeader}>
+              <View style={styles.editorTitleGroup}>
+                <View style={styles.editorBackIcon}>
+                  <Text style={styles.editorBackText}>⌖</Text>
+                </View>
+                <View>
+                  <Text style={styles.editorTitle}>Plan your ride</Text>
+                  <Text style={styles.editorSubtitle}>Choose where to be picked up and dropped off</Text>
+                </View>
+              </View>
+              <TouchableOpacity
+                style={styles.editorCloseButton}
+                accessibilityRole="button"
+                accessibilityLabel="Close location search"
+                onPress={() => {
+                  Keyboard.dismiss();
+                  setActiveLocationField(null);
+                  setIsEditingLocations(false);
+                }}
+              >
+                <Text style={styles.editorCloseText}>×</Text>
+              </TouchableOpacity>
             </View>
 
+            <View style={styles.editorFields}>
+              <View style={styles.editorRail}>
+                <View style={styles.editorPickupDot} />
+                <View style={styles.editorRailLine} />
+                <View style={styles.editorDestinationDot} />
+              </View>
+              <View style={styles.editorInputs}>
+                <View style={styles.editorPickupField}>
+                  <Text style={styles.editorFieldLabel}>PICKUP</Text>
+                  <TextInput
+                    style={styles.editorInput}
+                    accessibilityLabel="Pickup location"
+                    ref={pickupInputRef}
+                    value={pickup}
+                    selectTextOnFocus
+                    onFocus={() => {
+                      setLocationMode("pickup");
+                      setActiveLocationField("pickup");
+                    }}
+                    returnKeyType="next"
+                    autoCorrect={false}
+                    onSubmitEditing={() => destinationInputRef.current?.focus()}
+                    onChangeText={(value) => {
+                      setShowRideOptions(false);
+                      setUsingCurrentPickup(false);
+                      setPickup(value);
+                      setPickupLocation(null);
+                    }}
+                    placeholder="Enter pickup location"
+                    placeholderTextColor="#7f8b91"
+                  />
+                </View>
+                <View style={styles.editorDivider} />
+                <View style={styles.editorDestinationField}>
+                  <Text style={styles.editorDestinationLabel}>DESTINATION</Text>
+                  <TextInput
+                    style={[styles.editorInput, styles.editorDestinationInput]}
+                    accessibilityLabel="Destination"
+                    ref={destinationInputRef}
+                    value={destination}
+                    selectTextOnFocus
+                    onFocus={() => {
+                      setLocationMode("destination");
+                      setActiveLocationField("destination");
+                    }}
+                    returnKeyType="search"
+                    autoCorrect={false}
+                    onSubmitEditing={() => Keyboard.dismiss()}
+                    onChangeText={(value) => {
+                      setShowRideOptions(false);
+                      setDestination(value);
+                      setDestinationLocation(null);
+                    }}
+                    placeholder="Where would you like to go?"
+                    placeholderTextColor="#62747b"
+                  />
+                </View>
+              </View>
+            </View>
 
+            {suggestions.length > 0 && (
+              <View style={styles.editorSuggestions}>
+                {suggestions.map((suggestion) => (
+                  <TouchableOpacity
+                    key={suggestion.id}
+                    style={styles.editorSuggestion}
+                    onPress={() => selectSuggestion(suggestion)}
+                  >
+                    <View style={styles.suggestionIcon}>
+                      <Text style={styles.suggestionIconText}>⌖</Text>
+                    </View>
+                    <Text style={styles.editorSuggestionText} numberOfLines={2}>
+                      {suggestion.label}
+                    </Text>
+                    <Text style={styles.suggestionChevron}>›</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
+
+            <View style={styles.mapPickRow}>
+              <Text style={styles.mapPickHint}>Choose on map:</Text>
+              {(["pickup", "destination"] as const).map((mode) => (
+                <TouchableOpacity
+                  key={mode}
+                  onPress={() => {
+                    setLocationMode(mode);
+                    Keyboard.dismiss();
+                    setActiveLocationField(null);
+                  }}
+                  style={styles.mapPickButton}
+                >
+                  <Text style={styles.mapPickButtonText}>
+                    {mode === "pickup" ? "Pickup" : "Drop-off"}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <TouchableOpacity
+              style={[
+                styles.primaryButton,
+                (!pickupLocation || !destinationLocation) && styles.buttonDisabled,
+              ]}
+              disabled={!pickupLocation || !destinationLocation}
+              onPress={() => {
+                Keyboard.dismiss();
+                setActiveLocationField(null);
+                setIsEditingLocations(false);
+                setShowRideOptions(true);
+              }}
+            >
+              <Text style={styles.primaryButtonText}>See available rides</Text>
+            </TouchableOpacity>
+            {!!error && <Text style={styles.error}>{error}</Text>}
+          </ScrollView>
+        )}
+
+        {tripState === "IDLE" && showRideOptions && (
+          <ScrollView
+            style={rideSheetStyle}
+            contentContainerStyle={styles.sheet}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+          >
+            <View style={styles.sheetHandle} />
+            <View style={styles.sheetHeading}>
+              <View>
+                <Text style={styles.sheetTitle}>Choose your ride</Text>
+                <Text style={styles.sheetSubtitle}>
+                  {`${routedDistanceKm ? `${routedDistanceKm.toFixed(1)} km` : "Route"}${etaMinutes ? ` · ${etaMinutes} min` : ""}`}
+                </Text>
+              </View>
+              <TouchableOpacity
+                onPress={() => {
+                  setShowRideOptions(false);
+                  setIsEditingLocations(true);
+                }}
+              >
+                <Text style={styles.editRoute}>Edit route</Text>
+              </TouchableOpacity>
+            </View>
             <View style={styles.rideOptions}>
+              <View style={styles.optionsHeading}>
+                <Text style={styles.optionsTitle}>Available rides</Text>
+                <Text style={styles.nearbyLabel}>{nearbyDrivers.length} nearby</Text>
+              </View>
               {(["STANDARD", "COMFORT", "PREMIUM", "XL"] as const).map((cat) => (
                 <TouchableOpacity
-                  accessibilityRole="radio" accessibilityState={{checked: category === cat}} key={cat}
+                  accessibilityRole="radio"
+                  accessibilityState={{ checked: category === cat }}
+                  key={cat}
                   onPress={() => setCategory(cat)}
                   style={[
                     styles.rideOption,
                     category === cat && styles.rideOptionActive,
                   ]}
                 >
-                  <View
-                    style={[
-                      styles.carGlyph,
-                      category === cat && styles.carGlyphActive,
-                    ]}
-                  >
+                  <View style={[styles.carGlyph, category === cat && styles.carGlyphActive]}>
                     <CarIcon active={category === cat} />
                   </View>
-                  <View style={{flex: 1}}>
+                  <View style={{ flex: 1 }}>
                     <Text style={styles.rideName}>
                       2Go {cat[0] + cat.slice(1).toLowerCase()}
                     </Text>
@@ -727,18 +928,18 @@ export function CustomerHomeScreen({
                   <Text style={styles.ridePrice}>
                     {estimates[cat]
                       ? `${estimates[cat]!.currency} ${Math.round(estimates[cat]!.estimatedFare).toLocaleString()}`
-                      : "—"}
+                      : "Calculating"}
                   </Text>
                 </TouchableOpacity>
               ))}
             </View>
-            <View style={[styles.paymentRow, styles.disabledFeature]}>
+            <View style={styles.paymentRow}>
               <Text style={styles.paymentIcon}>R</Text>
               <View style={{ flex: 1 }}>
-                <Text style={styles.paymentText}>Cash payment</Text>
-                <Text style={styles.disabledFeatureText}>Online payments are not available yet</Text>
+                <Text style={styles.paymentText}>Cash</Text>
+                <Text style={styles.paymentHint}>Pay your driver after the ride</Text>
               </View>
-              <Text style={styles.comingSoon}>COMING SOON</Text>
+              <Text style={styles.paymentSelected}>SELECTED</Text>
             </View>
             {estimate?.pricingNotice && (
               <View style={styles.pricingNotice}>
@@ -749,22 +950,23 @@ export function CustomerHomeScreen({
               </View>
             )}
             <TouchableOpacity
-              style={styles.primaryButton}
+              style={[styles.primaryButton, !estimate && styles.buttonDisabled]}
               onPress={requestTrip}
+              disabled={!estimate}
             >
               <Text style={styles.primaryButtonText}>
                 Confirm 2Go {category[0] + category.slice(1).toLowerCase()} ·{" "}
                 {estimate
-                  ? `RWF ${Math.round(estimate.estimatedFare).toLocaleString()}`
+                  ? `${estimate.currency} ${Math.round(estimate.estimatedFare).toLocaleString()}`
                   : "Calculating..."}
               </Text>
             </TouchableOpacity>
             {!!error && <Text style={styles.error}>{error}</Text>}
-          </View>
+          </ScrollView>
         )}
 
         {tripState === "ASSIGNED" && (
-          <View style={styles.sheet}>
+          <ScrollView style={rideSheetStyle} contentContainerStyle={styles.sheet} showsVerticalScrollIndicator={false}>
             <View style={ui.handle}/>
             <View style={styles.statusLine}>
               <View style={styles.liveDot} />
@@ -797,11 +999,11 @@ export function CustomerHomeScreen({
             {trip?._id && ["DRIVER_ACCEPTED", "DRIVER_ARRIVED"].includes(trip.status) && (
               <TripChatPanel tripId={trip._id} userId={user.id} title="Chat with your driver" />
             )}
-          </View>
+          </ScrollView>
         )}
 
         {tripState === "ON_TRIP" && (
-          <View style={styles.sheet}>
+          <ScrollView style={rideSheetStyle} contentContainerStyle={styles.sheet} showsVerticalScrollIndicator={false}>
             <View style={[styles.statusLine, { backgroundColor: "#174039" }]}>
               <View style={styles.liveDot} />
               <Text style={styles.statusText}>TRIP IN PROGRESS</Text>
@@ -824,11 +1026,11 @@ export function CustomerHomeScreen({
             {trip?._id && (
               <TripChatPanel tripId={trip._id} userId={user.id} title="Chat with your driver" />
             )}
-          </View>
+          </ScrollView>
         )}
 
         {tripState === "COMPLETED" && (
-          <View style={styles.sheet}>
+          <ScrollView style={rideSheetStyle} contentContainerStyle={styles.sheet} showsVerticalScrollIndicator={false}>
             <View style={ui.success}><Text style={ui.check}>✓</Text><Text style={ui.label}>TRIP COMPLETED</Text><Text style={ui.successTitle}>You have arrived!</Text><Text style={ui.muted}>Thank you for riding with 2Go.</Text></View><RouteCard pickup={pickup} destination={destination}/><PersonCard name={trip?.driverId?.userId?.name || "Your driver"} detail="Rate your trip"/>
             <Text style={styles.fare}>
               RWF{" "}
@@ -860,9 +1062,9 @@ export function CustomerHomeScreen({
               </Text>
             </TouchableOpacity>
             {!!error && <Text style={styles.error}>{error}</Text>}
-          </View>
+          </ScrollView>
         )}
-        </>}
+        </View>}
 
         {activeTab === "Activity" && (
           <View style={styles.tabPage}>
@@ -938,8 +1140,8 @@ export function CustomerHomeScreen({
           </View>
         )}
       </ScrollView>
-      <View style={styles.bottomNav}>
-        {(["Services", "Rides", "Activity", "Account"] as const).map((tab) => (
+      {!keyboardHeight && <View style={styles.bottomNav}>
+        {(["Services", "Rides", "Rentals", "Movers", "Activity", "Account"] as const).map((tab) => (
           <TouchableOpacity
             key={tab}
             accessibilityRole="tab"
@@ -948,12 +1150,12 @@ export function CustomerHomeScreen({
             style={styles.navItem}
           >
             <Text style={[styles.navIcon, activeTab === tab && styles.navActive]}>
-              {tab === "Services" ? "▦" : tab === "Rides" ? "▰" : tab === "Activity" ? "▤" : "♙"}
+              {tab === "Services" ? "▦" : tab === "Rides" ? "▰" : tab === "Rentals" ? "⌑" : tab === "Movers" ? "⇧" : tab === "Activity" ? "▤" : "♙"}
             </Text>
             <Text style={[styles.navLabel, activeTab === tab && styles.navActive]}>{tab}</Text>
           </TouchableOpacity>
         ))}
-      </View>
+      </View>}
     </View>
   );
 }
@@ -962,6 +1164,8 @@ const styles = StyleSheet.create({
   plate: {color: colors.ink, backgroundColor: "#303a40", padding: 10, borderRadius: 8, alignSelf: "flex-end", fontWeight: "700"},
   screen: { flex: 1, backgroundColor: colors.navy },
   content: { paddingBottom: 92 },
+  rideContent: { flex: 1 },
+  rideScreen: { flex: 1, minHeight: 0, position: "relative" },
   mapHeader: {
     position: "absolute",
     zIndex: 2,
@@ -995,6 +1199,246 @@ const styles = StyleSheet.create({
     overflow: "hidden",
     position: "relative",
   },
+  fullScreenMap: {
+    ...StyleSheet.absoluteFill,
+    backgroundColor: "#1d282d",
+  },
+  rideSearchPrompt: {
+    position: "absolute",
+    bottom: 86,
+    left: 16,
+    right: 16,
+    zIndex: 4,
+    backgroundColor: "#f4f7f7",
+    borderRadius: 18,
+    paddingHorizontal: 18,
+    paddingVertical: 15,
+    borderWidth: 1,
+    borderColor: "#ffffff",
+    elevation: 8,
+    shadowColor: "#000000",
+    shadowOpacity: 0.18,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 5 },
+  },
+  locationEditorSheet: {
+    position: "absolute",
+    left: 12,
+    right: 12,
+    backgroundColor: "#ffffff",
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: "#e5ebed",
+    overflow: "hidden",
+    zIndex: 5,
+    elevation: 10,
+    shadowColor: "#000000",
+    shadowOpacity: 0.2,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 6 },
+  },
+  locationEditorContent: {
+    padding: 16,
+    paddingBottom: 18,
+  },
+  editorHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 14,
+  },
+  editorTitleGroup: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 11,
+  },
+  editorBackIcon: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#e9f7f8",
+  },
+  editorBackText: { color: "#087f8c", fontSize: 22, fontWeight: "700" },
+  editorTitle: { color: "#152126", fontSize: 17, fontWeight: "800" },
+  editorSubtitle: { color: "#66757b", fontSize: 11, marginTop: 2 },
+  editorCloseButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#eef1f2",
+    marginLeft: 8,
+  },
+  editorCloseText: { color: "#33434a", fontSize: 25, lineHeight: 28 },
+  editorFields: {
+    flexDirection: "row",
+    backgroundColor: "#f4f6f6",
+    borderRadius: 15,
+    padding: 10,
+    borderWidth: 1,
+    borderColor: "#e3e8e9",
+  },
+  editorRail: {
+    width: 22,
+    alignItems: "center",
+    paddingTop: 20,
+  },
+  editorPickupDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: "#18252a",
+  },
+  editorRailLine: {
+    height: 53,
+    borderLeftWidth: 1,
+    borderStyle: "dashed",
+    borderColor: "#8b999e",
+  },
+  editorDestinationDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 2,
+    backgroundColor: "#0aa6b5",
+  },
+  editorInputs: { flex: 1, gap: 7 },
+  editorPickupField: {
+    minHeight: 65,
+    justifyContent: "center",
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 10,
+    backgroundColor: "#ffffff",
+    borderWidth: 1,
+    borderColor: "#e6ebec",
+  },
+  editorDestinationField: {
+    minHeight: 74,
+    justifyContent: "center",
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 10,
+    backgroundColor: "#ffffff",
+    borderWidth: 2,
+    borderColor: "#078b9a",
+  },
+  editorFieldLabel: {
+    color: "#64747a",
+    fontSize: 10,
+    fontWeight: "800",
+    letterSpacing: 0.8,
+  },
+  editorDestinationLabel: {
+    color: "#087f8c",
+    fontSize: 10,
+    fontWeight: "900",
+    letterSpacing: 0.8,
+  },
+  editorInput: {
+    minHeight: 39,
+    color: "#1d2b31",
+    fontSize: 15,
+    padding: 0,
+    textAlignVertical: "center",
+  },
+  editorDestinationInput: {
+    color: "#14262c",
+    fontSize: 16,
+    fontWeight: "700",
+  },
+  editorDivider: { height: 1 },
+  editorSuggestions: {
+    marginTop: 8,
+    borderRadius: 12,
+    backgroundColor: "#f6f8f8",
+    borderWidth: 1,
+    borderColor: "#e5ebed",
+    overflow: "hidden",
+  },
+  editorSuggestion: {
+    minHeight: 48,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingHorizontal: 11,
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: "#e4e9ea",
+  },
+  suggestionIcon: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#e8eeee",
+  },
+  suggestionIconText: { color: "#59696f", fontSize: 16 },
+  editorSuggestionText: { flex: 1, color: "#233238", fontSize: 12, lineHeight: 17 },
+  suggestionChevron: { color: "#6b7b81", fontSize: 22 },
+  mapPickRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 7,
+    flexWrap: "wrap",
+    marginTop: 11,
+  },
+  mapPickHint: { color: "#66757b", fontSize: 11, marginRight: 2 },
+  mapPickButton: {
+    minHeight: 34,
+    justifyContent: "center",
+    paddingHorizontal: 11,
+    borderRadius: 17,
+    backgroundColor: "#edf5f5",
+  },
+  mapPickButtonText: { color: "#176773", fontSize: 11, fontWeight: "800" },
+  promptEyebrow: {
+    color: "#637278",
+    fontSize: 10,
+    fontWeight: "900",
+    letterSpacing: 1,
+  },
+  promptPickup: {
+    color: "#233139",
+    fontSize: 14,
+    fontWeight: "600",
+    marginTop: 3,
+    paddingRight: 30,
+  },
+  promptDivider: {
+    height: 1,
+    backgroundColor: "#dce3e4",
+    marginVertical: 10,
+  },
+  promptDestinationLabel: {
+    color: "#07869a",
+    fontSize: 10,
+    fontWeight: "900",
+    letterSpacing: 1,
+  },
+  promptDestination: {
+    color: "#14262c",
+    fontSize: 18,
+    fontWeight: "800",
+    marginTop: 3,
+    paddingRight: 30,
+  },
+  promptArrow: {
+    position: "absolute",
+    right: 16,
+    top: "42%",
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: "#d9f4f6",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  promptArrowText: { color: "#07869a", fontSize: 27, lineHeight: 30 },
   road: {
     position: "absolute",
     backgroundColor: "#dbe4e5",
@@ -1041,7 +1485,7 @@ const styles = StyleSheet.create({
   pinCore: { width: 5, height: 5, borderRadius: 3, backgroundColor: "#fff" },
   mapLabel: {
     position: "absolute",
-    bottom: 30,
+    top: 16,
     left: 12,
     backgroundColor: "#1c252a",
     paddingHorizontal: 9,
@@ -1057,7 +1501,7 @@ const styles = StyleSheet.create({
   locationButton: {
     position: "absolute",
     right: 18,
-    bottom: 18,
+    top: 12,
     width: 38,
     height: 38,
     borderRadius: 19,
@@ -1066,15 +1510,22 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   locationIcon: { color: colors.blue, fontSize: 25, lineHeight: 26 },
-  sheet: {
+  rideSheet: {
+    position: "absolute",
+    left: 12,
+    right: 12,
+    bottom: 84,
+    maxHeight: "76%",
     backgroundColor: colors.panel,
-    borderTopLeftRadius: 18,
-    borderTopRightRadius: 18,
-    marginTop: -22,
-    padding: 20,
-    zIndex: 3,
+    borderRadius: 22,
     borderWidth: 1,
     borderColor: colors.line,
+    overflow: "hidden",
+    zIndex: 3,
+  },
+  sheet: {
+    padding: 18,
+    paddingBottom: 20,
   },
   sheetHandle: {
     width: 42,
@@ -1082,14 +1533,37 @@ const styles = StyleSheet.create({
     borderRadius: 2,
     backgroundColor: "#3a484e",
     alignSelf: "center",
-    marginBottom: 12,
+    marginBottom: 5,
+  },
+  sheetToggle: {
+    alignSelf: "center",
+    alignItems: "center",
+    paddingHorizontal: 20,
+    paddingTop: 2,
+    paddingBottom: 8,
+  },
+  sheetToggleLabel: {
+    color: colors.muted,
+    fontSize: 9,
+    fontWeight: "800",
+    letterSpacing: 0.8,
   },
   sheetHeading: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
+    marginBottom: 14,
   },
+  sheetSubtitle: { color: colors.muted, fontSize: 12, marginTop: 1 },
+  editRoute: { color: colors.blue, fontSize: 12, fontWeight: "800", padding: 8 },
   nearbyLabel: { color: "#9ee9db", fontSize: 10, fontWeight: "800" },
+  optionsHeading: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 2,
+  },
+  optionsTitle: { color: colors.ink, fontSize: 14, fontWeight: "800" },
   pricingNotice: {
     backgroundColor: "#12282a",
     borderColor: "#25565a",
@@ -1106,38 +1580,78 @@ const styles = StyleSheet.create({
     color: colors.ink,
     fontSize: 20,
     fontWeight: "900",
-    marginBottom: 14,
+    marginBottom: 0,
   },
   searchBox: {
     flexDirection: "row",
-    backgroundColor: "#1c2429",
-    borderRadius: 14,
-    padding: 13,
+    backgroundColor: "#202a2f",
+    borderRadius: 16,
+    padding: 12,
     borderWidth: 1,
-    borderColor: "#2b363c",
+    borderColor: "#3d4a50",
   },
-  searchRail: { alignItems: "center", width: 18, paddingTop: 6 },
+  searchRail: { alignItems: "center", width: 18, paddingTop: 15 },
   greenDot: {
     width: 9,
     height: 9,
     borderRadius: 5,
     backgroundColor: colors.blue,
   },
-  blueDot: {
+  destinationDot: {
     width: 9,
     height: 9,
-    borderRadius: 5,
-    backgroundColor: colors.blue,
+    borderRadius: 2,
+    backgroundColor: "#34d399",
   },
   railLine: {
-    height: 25,
+    height: 54,
     borderLeftWidth: 1,
     borderStyle: "dashed",
     borderColor: colors.muted,
   },
   searchFields: { flex: 1 },
-  locationInput: { color: colors.ink, fontSize: 14, height: 32, padding: 0 },
-  fieldDivider: { height: 1, backgroundColor: colors.line },
+  locationField: {
+    minHeight: 70,
+    justifyContent: "center",
+    paddingHorizontal: 11,
+    paddingVertical: 7,
+    backgroundColor: "#182126",
+    borderRadius: 11,
+  },
+  destinationField: {
+    minHeight: 78,
+    justifyContent: "center",
+    paddingHorizontal: 11,
+    paddingVertical: 7,
+    backgroundColor: "#112b30",
+    borderRadius: 11,
+    borderWidth: 1,
+    borderColor: "#168a99",
+  },
+  locationFieldLabel: {
+    color: "#a9b9be",
+    fontSize: 10,
+    fontWeight: "800",
+    letterSpacing: 0.8,
+    marginBottom: 2,
+  },
+  destinationFieldLabel: {
+    color: "#54d9e7",
+    fontSize: 11,
+    fontWeight: "900",
+    letterSpacing: 1,
+    marginBottom: 2,
+  },
+  locationInput: {
+    color: colors.ink,
+    fontSize: 16,
+    minHeight: 42,
+    paddingVertical: 6,
+    paddingHorizontal: 0,
+    textAlignVertical: "center",
+  },
+  destinationInput: { color: "#ffffff", fontWeight: "700" },
+  fieldDivider: { height: 10 },
   suggestions: {
     backgroundColor: "#0e1519",
     borderWidth: 1,
@@ -1153,7 +1667,7 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.line,
   },
   suggestionText: { color: "#cbd7e7", fontSize: 12, lineHeight: 17 },
-  mapModeRow: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "#171e22", paddingHorizontal: 12, paddingBottom: 6, borderRadius: 12 },
+  mapModeRow: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "#171e22", paddingHorizontal: 12, paddingVertical: 8, borderRadius: 12, marginTop: 12 },
   mapMode: {
     borderWidth: 1,
     borderColor: colors.line,
@@ -1168,11 +1682,11 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: "800",
     letterSpacing: 1,
-    marginTop: 18,
-    marginBottom: 9,
+    marginTop: 0,
+    marginBottom: 0,
     textTransform: "uppercase",
   },
-  rideOptions: { gap: 9 },
+  rideOptions: { gap: 9, marginTop: 16 },
   rideOption: {
     width: "100%",
     flexDirection: "row",
@@ -1221,6 +1735,8 @@ const styles = StyleSheet.create({
     fontWeight: "900",
   },
   paymentText: { color: colors.ink, fontWeight: "700", marginLeft: 10 },
+  paymentHint: { color: colors.muted, fontSize: 10, marginLeft: 10, marginTop: 3 },
+  paymentSelected: { color: "#9ee9db", fontSize: 9, fontWeight: "900", letterSpacing: 0.6 },
   disabledFeature: { opacity: 0.48 },
   disabledFeatureText: { color: colors.muted, fontSize: 10, marginLeft: 10, marginTop: 3 },
   comingSoon: { color: colors.muted, fontSize: 9, fontWeight: "800", letterSpacing: 0.6 },
@@ -1249,6 +1765,7 @@ const styles = StyleSheet.create({
     marginTop: 16,
     paddingHorizontal: 12,
   },
+  buttonDisabled: { opacity: 0.45 },
   primaryButtonText: { color: "#071015", fontSize: 14, fontWeight: "900" },
   statusLine: {
     flexDirection: "row",
@@ -1340,9 +1857,9 @@ const styles = StyleSheet.create({
     justifyContent: "space-around",
     alignItems: "center",
   },
-  navItem: { alignItems: "center", gap: 3, minWidth: 60 },
+  navItem: { alignItems: "center", gap: 3, flex: 1, minWidth: 0 },
   navIcon: { color: colors.muted, fontSize: 21 },
-  navLabel: { color: colors.muted, fontSize: 10, fontWeight: "700" },
+  navLabel: { color: colors.muted, fontSize: 9, fontWeight: "700" },
   navActive: { color: colors.blue },
   card: {
     backgroundColor: "#131b2e",
