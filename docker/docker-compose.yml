@@ -29,6 +29,97 @@ services:
       JWT_ACCESS_SECRET: 2go_prod_jwt_access_secret_key_32chars_min
       JWT_REFRESH_SECRET: 2go_prod_jwt_refresh_secret_key_32chars_min
       CORS_ORIGIN: "*"
+      UPLOAD_DIR: /app/uploads
+    volumes:
+      - driver-uploads:/app/uploads
+    depends_on:
+      - mongodb
+    networks:
+      - 2go-network
+
+  messaging:
+    build:
+      context: ../messaging
+      dockerfile: Dockerfile
+    container_name: 2go-messaging
+    restart: always
+    ports:
+      - "4000:4000"
+    environment:
+      MIX_ENV: prod
+      PORT: 4000
+      JWT_ACCESS_SECRET: 2go_prod_jwt_access_secret_key_32chars_min
+      BACKEND_API_URL: http://backend:5000/api/v1
+      SECRET_KEY_BASE: 2go_production_secret_key_base_for_phoenix_at_least_64_bytes_0123456789abcdef
+    depends_on:
+      - backend
+    networks:
+      - 2go-network
+
+  movers-service:
+    build:
+      context: ../services/movers
+      dockerfile: Dockerfile
+    container_name: 2go-movers-service
+    restart: always
+    environment:
+      NODE_ENV: production
+      PORT: 5101
+      MONGODB_URI: mongodb://mongodb:27017/2go_movers
+      AUTH_API_URL: http://backend:5000/api/v1
+    depends_on:
+      - mongodb
+      - backend
+    networks:
+      - 2go-network
+
+  shopping-service:
+    build:
+      context: ../services/shopping
+      dockerfile: Dockerfile
+    container_name: 2go-shopping-service
+    restart: always
+    environment:
+      NODE_ENV: production
+      PORT: 5102
+      MONGODB_URI: mongodb://mongodb:27017/2go_shopping
+    depends_on:
+      - mongodb
+    networks:
+      - 2go-network
+
+  car-rentals-service:
+    build:
+      context: ../services/car-rentals
+      dockerfile: Dockerfile
+    container_name: 2go-car-rentals-service
+    restart: always
+    environment:
+      NODE_ENV: production
+      PORT: 5103
+      MONGODB_URI: mongodb://mongodb:27017/2go_car_rentals
+      UPLOAD_DIR: /app/uploads
+      RENTAL_DOCUMENT_ENCRYPTION_KEY: ${RENTAL_DOCUMENT_ENCRYPTION_KEY:?Set a private base64-encoded 32-byte rental-document encryption key}
+      AUTH_API_URL: http://backend:5000/api/v1
+      CORS_ORIGINS: ${RENTALS_CORS_ORIGINS:-http://localhost:3000,http://localhost:8081}
+    volumes:
+      - rental-uploads:/app/uploads
+    depends_on:
+      - mongodb
+      - backend
+    networks:
+      - 2go-network
+
+  delivery-service:
+    build:
+      context: ../services/delivery
+      dockerfile: Dockerfile
+    container_name: 2go-delivery-service
+    restart: always
+    environment:
+      NODE_ENV: production
+      PORT: 5104
+      MONGODB_URI: mongodb://mongodb:27017/2go_delivery
     depends_on:
       - mongodb
     networks:
@@ -44,11 +135,18 @@ services:
       - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
     depends_on:
       - backend
+      - messaging
+      - movers-service
+      - shopping-service
+      - car-rentals-service
+      - delivery-service
     networks:
       - 2go-network
 
 volumes:
   mongo-data:
+  driver-uploads:
+  rental-uploads:
 
 networks:
   2go-network:
