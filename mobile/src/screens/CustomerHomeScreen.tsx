@@ -2,6 +2,7 @@ import { CarIcon, PersonCard, RouteCard, ui } from "../design";
 import { ServicesHomeScreen } from "./ServicesHomeScreen";
 import { RentalsHomeScreen } from "./RentalsHomeScreen";
 import { MoversHomeScreen } from "./MoversHomeScreen";
+import { DeliveryHomeScreen } from "./DeliveryHomeScreen";
 import { TripChatPanel } from "../components/TripChatPanel";
 import React, { useEffect, useRef, useState } from "react";
 import {
@@ -162,7 +163,7 @@ export function CustomerHomeScreen({
 }) {
   const { height: windowHeight } = useWindowDimensions();
   const userName = user.name;
-  const [activeTab, setActiveTab] = useState<"Services" | "Rides" | "Rentals" | "Movers" | "Activity" | "Account">("Services");
+  const [activeTab, setActiveTab] = useState<"Services" | "Rides" | "Delivery" | "Rentals" | "Movers" | "Activity" | "Account">("Services");
   const tabScrollRef = useRef<ScrollViewInstance>(null);
   const [history, setHistory] = useState<Trip[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -672,9 +673,9 @@ export function CustomerHomeScreen({
       <ScrollView
         ref={tabScrollRef}
         contentContainerStyle={
-          activeTab === "Rides" || activeTab === "Rentals" || activeTab === "Movers" ? styles.rideContent : styles.content
+          activeTab === "Rides" || activeTab === "Delivery" || activeTab === "Rentals" || activeTab === "Movers" ? styles.rideContent : styles.content
         }
-        scrollEnabled={activeTab !== "Rides" && activeTab !== "Rentals" && activeTab !== "Movers"}
+        scrollEnabled={activeTab !== "Rides" && activeTab !== "Delivery" && activeTab !== "Rentals" && activeTab !== "Movers"}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
@@ -684,6 +685,7 @@ export function CustomerHomeScreen({
             currentLocation={currentLocation}
             activeTrip={trip}
             onSelectRide={() => setActiveTab("Rides")}
+            onSelectDelivery={() => setActiveTab("Delivery")}
             onSelectRentals={() => setActiveTab("Rentals")}
             onSelectMovers={() => setActiveTab("Movers")}
             onSelectActivity={() => setActiveTab("Activity")}
@@ -692,6 +694,7 @@ export function CustomerHomeScreen({
         )}
         {activeTab === "Rentals" && <RentalsHomeScreen />}
         {activeTab === "Movers" && <MoversHomeScreen user={user} />}
+        {activeTab === "Delivery" && <DeliveryHomeScreen />}
         {activeTab === "Rides" && <View style={styles.rideScreen}>
         <MapSurface
           pickup={pickupLocation || currentLocation}
@@ -1141,7 +1144,7 @@ export function CustomerHomeScreen({
         )}
       </ScrollView>
       {!keyboardHeight && <View style={styles.bottomNav}>
-        {(["Services", "Rides", "Rentals", "Movers", "Activity", "Account"] as const).map((tab) => (
+        {(["Services", "Rides", "Delivery", "Rentals", "Movers", "Activity", "Account"] as const).map((tab) => (
           <TouchableOpacity
             key={tab}
             accessibilityRole="tab"
@@ -1150,7 +1153,7 @@ export function CustomerHomeScreen({
             style={styles.navItem}
           >
             <Text style={[styles.navIcon, activeTab === tab && styles.navActive]}>
-              {tab === "Services" ? "▦" : tab === "Rides" ? "▰" : tab === "Rentals" ? "⌑" : tab === "Movers" ? "⇧" : tab === "Activity" ? "▤" : "♙"}
+              {tab === "Services" ? "▦" : tab === "Rides" ? "▰" : tab === "Delivery" ? "▣" : tab === "Rentals" ? "⌑" : tab === "Movers" ? "⇧" : tab === "Activity" ? "▤" : "♙"}
             </Text>
             <Text style={[styles.navLabel, activeTab === tab && styles.navActive]}>{tab}</Text>
           </TouchableOpacity>

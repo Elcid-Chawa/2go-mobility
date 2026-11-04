@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { PersonCard, RouteCard, ui } from "../design";
 import { TripChatPanel } from "../components/TripChatPanel";
+import { DriverDeliveriesPanel } from "./DriverDeliveriesPanel";
 import {
   Alert,
   StyleSheet,
@@ -100,7 +101,7 @@ export function DriverHomeScreen({
   userId: string;
   userName: string;
 }) {
-  const [activeTab, setActiveTab] = useState<"Rides" | "Earnings">("Rides");
+  const [activeTab, setActiveTab] = useState<"Rides" | "Earnings" | "Deliveries">("Rides");
   const [isOnline, setIsOnline] = useState(false);
   const [driverState, setDriverState] = useState<
     "IDLE" | "OFFER" | "ACCEPTED" | "ARRIVED" | "IN_TRIP" | "COMPLETED"
@@ -302,6 +303,8 @@ export function DriverHomeScreen({
         contentContainerStyle={styles.container}
         showsVerticalScrollIndicator={false}
       >
+        {activeTab === "Deliveries" ? <DriverDeliveriesPanel /> : (
+        <>
         {activeTab === "Rides" && driverState !== "COMPLETED" && <DriverMap
           location={currentLocation}
           pickup={
@@ -487,10 +490,13 @@ export function DriverHomeScreen({
         </View>}
         {activeTab === "Earnings" && <View style={styles.card}><Text style={ui.label}>EARNINGS OVERVIEW</Text><Text style={ui.total}>{earnings ? `${earnings.currency} ${earnings.totalEarnings.toLocaleString()}` : "Loading…"}</Text><Text style={ui.footnote}>Earnings from your completed trips.</Text></View>}
         {!!error && <Text style={styles.error}>{error}</Text>}
+        </>
+        )}
       </ScrollView>
       <View style={styles.bottomNav}>
         <DriverNavItem icon="◎" label="Rides" active={activeTab === "Rides"} onPress={() => setActiveTab("Rides")} />
         <DriverNavItem icon="▣" label="Earnings" active={activeTab === "Earnings"} onPress={() => setActiveTab("Earnings")} />
+        <DriverNavItem icon="□" label="Deliveries" active={activeTab === "Deliveries"} onPress={() => setActiveTab("Deliveries")} />
       </View>
     </View>
   );

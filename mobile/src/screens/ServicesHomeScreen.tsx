@@ -33,7 +33,7 @@ const services: {
     title: "Delivery Express",
     description: "Send parcels and goods across your city.",
     icon: "▣",
-    label: "COMING SOON",
+    label: "BOOK NOW",
   },
   {
     key: "shopping",
@@ -85,6 +85,7 @@ export function ServicesHomeScreen({
   currentLocation,
   activeTrip,
   onSelectRide,
+  onSelectDelivery,
   onSelectRentals,
   onSelectMovers,
   onSelectActivity,
@@ -94,6 +95,7 @@ export function ServicesHomeScreen({
   currentLocation: MapCoordinate | null;
   activeTrip: Trip | null;
   onSelectRide: () => void;
+  onSelectDelivery: () => void;
   onSelectRentals: () => void;
   onSelectMovers: () => void;
   onSelectActivity: () => void;
@@ -117,6 +119,10 @@ export function ServicesHomeScreen({
     }
     if (key === "movers") {
       onSelectMovers();
+      return;
+    }
+    if (key === "delivery") {
+      onSelectDelivery();
       return;
     }
     Alert.alert(
@@ -212,7 +218,7 @@ export function ServicesHomeScreen({
 
         <View style={styles.sectionHeading}>
           <Text style={styles.sectionTitle}>Urban Hub Services</Text>
-          <Text style={styles.availability}>3 AVAILABLE · 2 COMING SOON</Text>
+          <Text style={styles.availability}>4 AVAILABLE · 1 COMING SOON</Text>
         </View>
 
         <TouchableOpacity
@@ -252,7 +258,7 @@ export function ServicesHomeScreen({
                 <View style={styles.serviceIcon}>
                   <Text style={styles.serviceGlyph}>{service.icon}</Text>
                 </View>
-                <Text style={[styles.comingSoon, service.key === "rentals" && styles.availableLabel]}>{service.label}</Text>
+                <Text style={[styles.comingSoon, (service.key === "rentals" || service.key === "delivery" || service.key === "movers") && styles.availableLabel]}>{service.label}</Text>
               </View>
               <Text style={styles.serviceTitle}>{service.title}</Text>
               <Text style={styles.serviceDescription} numberOfLines={2}>
@@ -273,7 +279,7 @@ export function ServicesHomeScreen({
           <View style={styles.infoCopy}>
             <Text style={styles.infoTitle}>More ways to go, all in one app</Text>
             <Text style={styles.infoDescription}>
-              Book rides, plan a relocation, or find a rental vehicle with 2Go.
+              Book rides, send a parcel, plan a relocation, or find a rental vehicle with 2Go.
             </Text>
           </View>
         </View>

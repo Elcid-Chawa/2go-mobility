@@ -103,6 +103,11 @@ const RENTALS_API_URL =
 const MOVERS_API_URL =
   process.env.EXPO_PUBLIC_MOVERS_API_URL ||
   API_URL.replace(/:\d+\/api\/v1$/, ":5101/api/v1/movers");
+const DELIVERY_API_URL =
+  process.env.EXPO_PUBLIC_DELIVERY_API_URL ||
+  (/:\d+\/api\/v1$/.test(API_URL)
+    ? API_URL.replace(/:\d+\/api\/v1$/, ":5104/api/v1/delivery")
+    : `${API_URL.replace(/\/api\/v1\/?$/, "")}/api/v1/delivery`);
 const ACCESS_TOKEN_KEY = "2go.accessToken";
 const REFRESH_TOKEN_KEY = "2go.refreshToken";
 
@@ -264,6 +269,55 @@ export interface MoverMove {
   review?: string;
 }
 
+export type DeliveryStatus =
+  | "REQUESTED"
+  | "ASSIGNED"
+  | "PICKED_UP"
+  | "IN_TRANSIT"
+  | "DELIVERED"
+  | "CANCELLED";
+
+export type DeliveryPackageType = "DOCUMENT" | "SMALL" | "MEDIUM" | "LARGE";
+
+export interface DeliveryOrder {
+  _id: string;
+  customerId: string;
+  customerName: string;
+  customerPhone: string;
+  recipientName: string;
+  recipientPhone: string;
+  pickupAddress: string;
+  pickupCoordinates: [number, number];
+  destinationAddress: string;
+  destinationCoordinates: [number, number];
+  packageType: DeliveryPackageType;
+  packageDescription: string;
+  weightKg: number;
+  fragile: boolean;
+  notes: string;
+  estimatedDistanceKm: number;
+  estimatedFare: number;
+  currency: string;
+  status: DeliveryStatus;
+  driverId?: string;
+  driverName?: string;
+  driverPhone?: string;
+  driverLocation?: { coordinates: [number, number]; updatedAt: string };
+  paymentStatus: "PENDING" | "PAID" | "FAILED";
+  paymentMethod?: "CASH" | "MOBILE_MONEY";
+  rating?: { score: number; comment: string };
+  createdAt: string;
+}
+
+export interface DeliveryEstimate {
+  distanceKm: number;
+  fare: number;
+  currency: string;
+  baseFee: number;
+  perKmRate: number;
+  perKgRate: number;
+}
+
 async function moverRequest<T>(path: string, options: RequestInit = {}): Promise<T> {
   let token = await getAccessToken();
   if (!token) throw new Error("Sign in to continue.");
@@ -320,6 +374,100 @@ export async function reviewMoverService(moveId: string, rating: number, review:
   return moverRequest<MoverMove>(`/moves/${moveId}/review`, {
     method: "POST",
     body: JSON.stringify({ rating, review }),
+  });
+}
+
+async function deliveryRequest<T>(path: string, options: RequestInit = {}): Promise<T> {
+  let token = await getAccessToken();
+  if (!token) throw new Error("Sign in to continue.");
+  const send = (accessToken: string) =>
+    fetch(`${DELIVERY_API_URL}${path}`, {
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        ...options.headers,
+        Authorization: "Bearer " + accessToken,
+      },
+    });
+  let response = await send(token);
+  if (response.status === 401) {
+    const refreshToken = await SecureStore.getItemAsync(REFRESH_TOKEN_KEY);
+    if (!refreshToken) throw new Error("Your session has expired. Sign in again.");
+    const refreshed = await request<{ accessToken: string; refreshToken: string }>(
+      "/auth/refresh",
+      { method: "POST", body: JSON.stringify({ refreshToken }) },
+    );
+    await saveTokens(refreshed.accessToken, refreshed.refreshToken);
+    token = refreshed.accessToken;
+    response = await send(token);
+  }
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok || body.success === false) {
+    throw new Error(body.message || "The delivery request could not be completed.");
+  }
+  return body.data as T;
+}
+
+export async function estimateDelivery(input: {
+  pickupCoordinates: [number, number];
+  destinationCoordinates: [number, number];
+  weightKg: number;
+}) {
+  return deliveryRequest<DeliveryEstimate>("/pricing/estimate", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export async function createDelivery(input: {
+  recipientName: string;
+  recipientPhone: string;
+  pickupAddress: string;
+  pickupCoordinates: [number, number];
+  destinationAddress: string;
+  destinationCoordinates: [number, number];
+  packageType: DeliveryPackageType;
+  packageDescription: string;
+  weightKg: number;
+  fragile: boolean;
+  notes: string;
+}) {
+  return deliveryRequest<DeliveryOrder>("/orders", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export async function getMyDeliveries() {
+  return deliveryRequest<DeliveryOrder[]>("/orders/mine");
+}
+
+export async function cancelDelivery(orderId: string) {
+  return deliveryRequest<DeliveryOrder>(`/orders/${orderId}/cancel`, { method: "PATCH" });
+}
+
+export async function rateDelivery(orderId: string, score: number, comment: string) {
+  return deliveryRequest<DeliveryOrder>(`/orders/${orderId}/rating`, {
+    method: "POST",
+    body: JSON.stringify({ score, comment }),
+  });
+}
+
+export async function getDriverDeliveries() {
+  return deliveryRequest<DeliveryOrder[]>("/driver/orders");
+}
+
+export async function updateDeliveryStatus(orderId: string, status: "PICKED_UP" | "IN_TRANSIT" | "DELIVERED") {
+  return deliveryRequest<DeliveryOrder>(`/driver/orders/${orderId}/status`, {
+    method: "PATCH",
+    body: JSON.stringify({ status }),
+  });
+}
+
+export async function updateDeliveryLocation(orderId: string, coordinates: [number, number]) {
+  return deliveryRequest(`/driver/orders/${orderId}/location`, {
+    method: "POST",
+    body: JSON.stringify({ coordinates }),
   });
 }
 
