@@ -93,6 +93,12 @@ export class DriverService {
     }
 
     if (data.onlineStatus !== undefined) {
+      if (
+        driver.deliveryAssignmentId &&
+        data.onlineStatus === DriverOnlineStatus.OFFLINE
+      ) {
+        throw { statusCode: 409, message: "Complete or cancel the assigned delivery before going offline." };
+      }
       driver.onlineStatus = data.onlineStatus;
       if (data.onlineStatus === DriverOnlineStatus.OFFLINE) {
         driver.availabilityStatus = DriverAvailabilityStatus.AVAILABLE;
@@ -100,11 +106,71 @@ export class DriverService {
     }
 
     if (data.availabilityStatus !== undefined) {
-      driver.availabilityStatus = data.availabilityStatus;
+      driver.availabilityStatus = driver.deliveryAssignmentId
+        ? DriverAvailabilityStatus.BUSY
+        : data.availabilityStatus;
     }
 
     await driver.save();
     return driver;
+  }
+
+  static async setDeliveryAssignment(
+    driverId: string,
+    deliveryId: string,
+    action: "LOCK" | "RELEASE",
+  ): Promise<IDriver> {
+    if (action === "LOCK") {
+      const current = await Driver.findById(driverId);
+      if (!current) throw { statusCode: 404, message: "Driver not found" };
+      if (current.deliveryAssignmentId === deliveryId) return current;
+      const vehicle = current.activeVehicleId
+        ? await Vehicle.findOne({ _id: current.activeVehicleId, status: "ACTIVE" })
+        : null;
+      if (
+        current.approvalStatus !== DriverApprovalStatus.APPROVED ||
+        current.onlineStatus !== DriverOnlineStatus.ONLINE ||
+        current.availabilityStatus !== DriverAvailabilityStatus.AVAILABLE ||
+        !vehicle
+      ) {
+        throw { statusCode: 409, message: "Driver must be approved, online, available, and have an active vehicle." };
+      }
+      const locked = await Driver.findOneAndUpdate(
+        {
+          _id: driverId,
+          approvalStatus: DriverApprovalStatus.APPROVED,
+          onlineStatus: DriverOnlineStatus.ONLINE,
+          availabilityStatus: DriverAvailabilityStatus.AVAILABLE,
+          activeVehicleId: current.activeVehicleId,
+          deliveryAssignmentId: { $exists: false },
+        },
+        {
+          $set: {
+            availabilityStatus: DriverAvailabilityStatus.BUSY,
+            deliveryAssignmentId: deliveryId,
+          },
+        },
+        { new: true },
+      );
+      if (locked) return locked;
+      const latest = await Driver.findById(driverId);
+      if (latest?.deliveryAssignmentId === deliveryId) return latest;
+      throw { statusCode: 409, message: "Driver is no longer available for assignment." };
+    }
+
+    const released = await Driver.findOneAndUpdate(
+      { _id: driverId, deliveryAssignmentId: deliveryId },
+      {
+        $set: { availabilityStatus: DriverAvailabilityStatus.AVAILABLE },
+        $unset: { deliveryAssignmentId: 1 },
+      },
+      { new: true },
+    );
+    if (released) return released;
+    const current = await Driver.findById(driverId);
+    if (!current) throw { statusCode: 404, message: "Driver not found" };
+    if (!current.deliveryAssignmentId) return current;
+    throw { statusCode: 409, message: "Driver is assigned to a different delivery." };
   }
 
   static async updateLocation(

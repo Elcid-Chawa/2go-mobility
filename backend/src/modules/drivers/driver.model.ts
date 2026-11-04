@@ -12,6 +12,7 @@ export interface IDriver extends Document {
   approvalStatus: DriverApprovalStatus;
   onlineStatus: DriverOnlineStatus;
   availabilityStatus: DriverAvailabilityStatus;
+  deliveryAssignmentId?: string;
   currentLocation: {
     type: 'Point';
     coordinates: [number, number]; // [lng, lat]
@@ -63,6 +64,10 @@ const DriverSchema = new Schema<IDriver>(
       type: String,
       enum: Object.values(DriverAvailabilityStatus),
       default: DriverAvailabilityStatus.AVAILABLE,
+      index: true,
+    },
+    deliveryAssignmentId: {
+      type: String,
       index: true,
     },
     currentLocation: {

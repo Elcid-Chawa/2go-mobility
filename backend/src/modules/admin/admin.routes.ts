@@ -9,6 +9,7 @@ import {
   createVehicleSchema,
   updateVehicleStatusSchema,
   manualAssignSchema,
+  deliveryDriverLockSchema,
 } from './admin.validation';
 
 const router = Router();
@@ -18,6 +19,7 @@ router.use(authenticate);
 router.get('/dashboard', requirePermissions(Permission.VIEW_OPERATIONS), AdminController.getDashboard);
 router.get('/trips', requirePermissions(Permission.VIEW_OPERATIONS), AdminController.getTrips);
 router.get('/drivers', requirePermissions(Permission.VIEW_OPERATIONS), AdminController.getDrivers);
+router.patch('/drivers/:id/delivery-lock', requirePermissions(Permission.DELIVERY_MANAGE), validate(deliveryDriverLockSchema), AdminController.setDeliveryDriverLock);
 router.get('/vehicles', requirePermissions(Permission.VIEW_OPERATIONS), AdminController.getVehicles);
 router.get('/customers', requirePermissions(Permission.VIEW_OPERATIONS), AdminController.getCustomers);
 router.get('/users', requirePermissions(Permission.USER_MANAGE), AdminController.getUsers);

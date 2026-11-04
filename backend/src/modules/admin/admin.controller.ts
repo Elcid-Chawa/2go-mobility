@@ -4,6 +4,7 @@ import { DispatchService } from '../dispatch/dispatch.service';
 import { ApiResponse } from '../../utils/apiResponse';
 import { AuthRequest } from '../../middlewares/auth';
 import { VehicleService } from '../vehicles/vehicle.service';
+import { DriverService } from '../drivers/driver.service';
 
 export class AdminController {
   static async getDashboard(req: Request, res: Response, next: NextFunction): Promise<void> {
@@ -28,6 +29,20 @@ export class AdminController {
     try {
       const drivers = await AdminService.getDrivers();
       ApiResponse.success(res, drivers, 'Drivers retrieved');
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  static async setDeliveryDriverLock(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const { deliveryId, action } = req.body as { deliveryId: string; action: "LOCK" | "RELEASE" };
+      const driver = await DriverService.setDeliveryAssignment(
+        req.params.id as string,
+        deliveryId,
+        action,
+      );
+      ApiResponse.success(res, driver, action === "LOCK" ? "Driver reserved for delivery" : "Driver delivery reservation released");
     } catch (error) {
       next(error);
     }

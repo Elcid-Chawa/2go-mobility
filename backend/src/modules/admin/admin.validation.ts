@@ -42,3 +42,11 @@ export const manualAssignSchema = z.object({
   params: z.object({ id: objectId }),
   body: z.object({ driverId: objectId }),
 });
+
+export const deliveryDriverLockSchema = z.object({
+  params: z.object({ id: objectId }),
+  body: z.object({
+    deliveryId: objectId,
+    action: z.enum(["LOCK", "RELEASE"]),
+  }),
+});

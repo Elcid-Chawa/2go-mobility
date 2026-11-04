@@ -11,6 +11,7 @@ export enum Permission {
   RENTAL_REVIEW = 'RENTAL_REVIEW',
   MOVER_MANAGE = 'MOVER_MANAGE',
   MOVER_REVIEW = 'MOVER_REVIEW',
+  DELIVERY_MANAGE = 'DELIVERY_MANAGE',
 }
 
 export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
@@ -26,10 +27,12 @@ export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     Permission.RENTAL_REVIEW,
     Permission.MOVER_MANAGE,
     Permission.MOVER_REVIEW,
+    Permission.DELIVERY_MANAGE,
   ],
   [UserRole.DISPATCHER]: [
     Permission.VIEW_OPERATIONS,
     Permission.DISPATCH_EXECUTE,
+    Permission.DELIVERY_MANAGE,
   ],
   [UserRole.AGENT]: [Permission.VIEW_OPERATIONS],
   [UserRole.VIEWER]: [Permission.VIEW_OPERATIONS],

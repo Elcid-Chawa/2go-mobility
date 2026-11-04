@@ -11,9 +11,10 @@ export const env = {
   JWT_REFRESH_SECRET: process.env.JWT_REFRESH_SECRET || '2go_fallback_refresh_secret_key_32chars_min',
   JWT_ACCESS_EXPIRES_IN: process.env.JWT_ACCESS_EXPIRES_IN || '15m',
   JWT_REFRESH_EXPIRES_IN: process.env.JWT_REFRESH_EXPIRES_IN || '7d',
-  CORS_ORIGIN: (process.env.CORS_ORIGIN || 'http://localhost:3000,http://localhost:19006,http://localhost:8081')
+  CORS_ORIGIN: (process.env.CORS_ORIGIN || '*')
     .split(',')
     .map((origin) => origin.trim()),
+  CORS_ALLOW_ALL: (process.env.CORS_ALLOW_ALL || 'true').toLowerCase() !== 'false',
   LOG_LEVEL: process.env.LOG_LEVEL || 'info',
   DISPATCH_OFFER_TIMEOUT_SECONDS: parseInt(process.env.DISPATCH_OFFER_TIMEOUT_SECONDS || '15', 10),
   DISPATCH_SEARCH_RADIUS_KM: parseFloat(process.env.DISPATCH_SEARCH_RADIUS_KM || '10'),
