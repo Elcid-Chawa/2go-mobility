@@ -17,8 +17,9 @@ export const env = {
   RENTAL_DOCUMENT_ENCRYPTION_KEY: process.env.RENTAL_DOCUMENT_ENCRYPTION_KEY || "",
   AUTH_API_URL:
     process.env.AUTH_API_URL || "http://localhost:5000/api/v1",
-  CORS_ORIGINS: (process.env.CORS_ORIGINS || "http://localhost:3000")
+  CORS_ORIGINS: (process.env.CORS_ORIGINS || "*")
     .split(",")
     .map((origin) => origin.trim())
     .filter(Boolean),
+  CORS_ALLOW_ALL: (process.env.CORS_ALLOW_ALL || "true").toLowerCase() !== "false",
 };

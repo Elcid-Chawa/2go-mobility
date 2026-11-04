@@ -11,9 +11,11 @@ The following services are separate Node.js/Express/TypeScript applications:
 | Delivery | `services/delivery` | `/api/v1/delivery` | `2go_delivery` | 5104 |
 
 Each service has an independent package, Docker image, process, and MongoDB
-database name. The Docker Compose development/deployment stack currently runs
-these databases on the existing MongoDB server; production can move each service
-to its own MongoDB deployment by changing that service's `MONGODB_URI`.
+database name. Delivery supports customer booking and pricing, Operations
+dispatch, driver execution and location updates, and Operations payment
+confirmation. The Docker Compose stack currently runs these databases on the
+existing MongoDB server; production can move each service to its own MongoDB
+deployment by changing that service's `MONGODB_URI`.
 
 ## Run locally
 
@@ -72,8 +74,8 @@ Set `EXPO_PUBLIC_RENTALS_API_URL` for the mobile app and
 `NEXT_PUBLIC_RENTALS_API_URL` for Operations. For local development these point
 to port 5103; behind Nginx they can point to the same host's
 `/api/v1/car-rentals` path. Browser origins must be included in the rental
-service's comma-separated `CORS_ORIGINS` setting (`RENTALS_CORS_ORIGINS` in
-Compose). Native mobile requests do not use browser CORS.
+service's comma-separated `CORS_ORIGINS` setting. The current testing
+configuration uses `*`; native mobile requests do not use browser CORS.
 
 For Movers, set `EXPO_PUBLIC_MOVERS_API_URL` and `NEXT_PUBLIC_MOVERS_API_URL`.
 Locally these point to port 5101; behind Nginx they can use the same host's
@@ -81,6 +83,41 @@ Locally these point to port 5101; behind Nginx they can use the same host's
 their fleet and quotes at `/movers`. Operations can create agencies and trucks,
 quote for platform-managed agencies, monitor the move lifecycle, and record
 cash payment from the same Operations page.
+
+## Delivery workflow
+
+Customers enter pickup and destination addresses, recipient contact details,
+parcel size and weight, and handling notes in the mobile Delivery tab. The
+mobile app resolves addresses to coordinates and requests an authenticated,
+server-calculated fare. The MVP estimate uses a straight-line distance with an
+Operations-configured road factor, per-kilometre fee, base fee, and per-kilogram
+fee; it is an estimate, not a navigation route. Delivery orders are created
+with a fare snapshot and start in `REQUESTED`.
+
+Operations users and Dispatchers can review orders in `/delivery`, adjust the
+tariff, assign an approved active driver who is online and available, cancel
+active orders, and record cash or mobile-money payment after delivery. A
+successful assignment also marks the driver's central ride-hailing availability
+as busy so the dispatch engine cannot offer that driver another ride or
+delivery at the same time. Drivers see assigned jobs in the mobile Deliveries
+tab, confirm pickup, start transit, and confirm delivery. Driver GPS updates
+are shared with Operations and the customer while the job is active. Customers
+can cancel only before assignment and can rate a delivered parcel once.
+
+Delivery API routes include `POST /api/v1/delivery/pricing/estimate`,
+`POST /api/v1/delivery/orders`, `GET /api/v1/delivery/orders/mine`,
+`GET /api/v1/delivery/driver/orders`, and the `/admin` operations endpoints.
+Configure `EXPO_PUBLIC_DELIVERY_API_URL` for mobile and
+`NEXT_PUBLIC_DELIVERY_API_URL` for Operations. Local defaults use port 5104;
+behind Nginx use `/api/v1/delivery`.
+
+For the current testing period, `CORS_ALLOW_ALL` defaults to `true` for the
+central API and domain services. This allows wildcard CORS origins (`*`) and
+does not enable credentialed browser requests; clients authenticate with
+bearer tokens. Before public production use, set `CORS_ALLOW_ALL=false` and
+provide trusted origins through `CORS_ORIGIN`, `MOVERS_CORS_ORIGINS`,
+`RENTALS_CORS_ORIGINS`, and `DELIVERY_CORS_ORIGINS`. Native mobile HTTP
+clients do not enforce browser CORS.
 
 ## Car-rental MVP workflow
 

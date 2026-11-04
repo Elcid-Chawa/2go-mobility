@@ -13,4 +13,10 @@ export const env = {
   PORT: port,
   MONGODB_URI:
     process.env.MONGODB_URI || "mongodb://localhost:27017/2go_delivery",
+  AUTH_API_URL: process.env.AUTH_API_URL || "http://localhost:5000/api/v1",
+  CORS_ALLOW_ALL: (process.env.CORS_ALLOW_ALL || "true").toLowerCase() !== "false",
+  CORS_ORIGINS: (process.env.CORS_ORIGINS || "http://localhost:3000,http://localhost:8081")
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean),
 };
