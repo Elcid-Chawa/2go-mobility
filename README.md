@@ -17,9 +17,9 @@ Authoritative, full-stack ride-hailing vertical slice uniting Customer, Driver, 
 ### Domain Services
 
 The existing `backend/` remains the ride-share service and authentication
-authority. Independent Node.js/TypeScript service scaffolds are available for
-Movers, Shopping, Car Rentals, and Delivery under [`services/`](services/README.md).
-Each currently has its own process, Docker image, and MongoDB database name.
+authority. Independent Node.js/TypeScript services for Movers, Shopping, Car
+Rentals, and Delivery are under [`services/`](services/README.md). Each has
+its own process, Docker image, and MongoDB database name.
 Service APIs are routed through Nginx under `/api/v1/{service}`. See the
 [domain services guide](services/README.md) for local and Docker instructions.
 

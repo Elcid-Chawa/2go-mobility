@@ -28,7 +28,8 @@ services:
       MONGODB_URI: mongodb://mongodb:27017/2go_prod
       JWT_ACCESS_SECRET: 2go_prod_jwt_access_secret_key_32chars_min
       JWT_REFRESH_SECRET: 2go_prod_jwt_refresh_secret_key_32chars_min
-      CORS_ORIGIN: "*"
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:3000,http://localhost:8081}
+      CORS_ALLOW_ALL: ${CORS_ALLOW_ALL:-true}
       UPLOAD_DIR: /app/uploads
     volumes:
       - driver-uploads:/app/uploads
@@ -67,6 +68,8 @@ services:
       PORT: 5101
       MONGODB_URI: mongodb://mongodb:27017/2go_movers
       AUTH_API_URL: http://backend:5000/api/v1
+      CORS_ORIGINS: "${MOVERS_CORS_ORIGINS:-http://localhost:3000,http://localhost:8081}"
+      CORS_ALLOW_ALL: ${CORS_ALLOW_ALL:-true}
     depends_on:
       - mongodb
       - backend
@@ -101,7 +104,8 @@ services:
       UPLOAD_DIR: /app/uploads
       RENTAL_DOCUMENT_ENCRYPTION_KEY: ${RENTAL_DOCUMENT_ENCRYPTION_KEY:?Set a private base64-encoded 32-byte rental-document encryption key}
       AUTH_API_URL: http://backend:5000/api/v1
-      CORS_ORIGINS: ${RENTALS_CORS_ORIGINS:-http://localhost:3000,http://localhost:8081}
+      CORS_ORIGINS: "${RENTALS_CORS_ORIGINS:-http://localhost:3000,http://localhost:8081}"
+      CORS_ALLOW_ALL: ${CORS_ALLOW_ALL:-true}
     volumes:
       - rental-uploads:/app/uploads
     depends_on:
@@ -120,8 +124,12 @@ services:
       NODE_ENV: production
       PORT: 5104
       MONGODB_URI: mongodb://mongodb:27017/2go_delivery
+      AUTH_API_URL: http://backend:5000/api/v1
+      CORS_ORIGINS: "${DELIVERY_CORS_ORIGINS:-http://localhost:3000,http://localhost:8081}"
+      CORS_ALLOW_ALL: ${CORS_ALLOW_ALL:-true}
     depends_on:
       - mongodb
+      - backend
     networks:
       - 2go-network
 

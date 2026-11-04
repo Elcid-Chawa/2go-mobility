@@ -14,8 +14,9 @@ export const env = {
   MONGODB_URI:
     process.env.MONGODB_URI || "mongodb://localhost:27017/2go_movers",
   AUTH_API_URL: process.env.AUTH_API_URL || "http://localhost:5000/api/v1",
-  CORS_ORIGINS: (process.env.CORS_ORIGINS || "http://localhost:3000")
+  CORS_ORIGINS: (process.env.CORS_ORIGINS || "*")
     .split(",")
     .map((origin) => origin.trim())
     .filter(Boolean),
+  CORS_ALLOW_ALL: (process.env.CORS_ALLOW_ALL || "true").toLowerCase() !== "false",
 };
