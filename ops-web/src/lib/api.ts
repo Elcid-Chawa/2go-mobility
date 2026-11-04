@@ -6,6 +6,9 @@ const RENTALS_API_URL =
 const MOVERS_API_URL =
   process.env.NEXT_PUBLIC_MOVERS_API_URL ||
   "http://localhost:5101/api/v1/movers";
+const DELIVERY_API_URL =
+  process.env.NEXT_PUBLIC_DELIVERY_API_URL ||
+  "http://localhost:5104/api/v1/delivery";
 const ACCESS_TOKEN_KEY = "2go.ops.accessToken";
 const REFRESH_TOKEN_KEY = "2go.ops.refreshToken";
 
@@ -172,6 +175,35 @@ export async function moverRequest<T>(
         Authorization: "Bearer " + token,
       },
     });
+  let response = await send(accessToken);
+  if (response.status === 401) {
+    try {
+      response = await send(await refreshAccessToken());
+    } catch (error) {
+      sessionStorage.removeItem(ACCESS_TOKEN_KEY);
+      sessionStorage.removeItem(REFRESH_TOKEN_KEY);
+      throw error;
+    }
+  }
+  return decodeResponse<T>(response);
+}
+
+export async function deliveryRequest<T>(
+  path: string,
+  options: RequestInit = {},
+): Promise<T> {
+  const accessToken = getAccessToken();
+  if (!accessToken) throw new Error("Sign in to continue.");
+  const send = (token: string) =>
+    fetch(`${DELIVERY_API_URL}${path}`, {
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        ...options.headers,
+        Authorization: "Bearer " + token,
+      },
+    });
+
   let response = await send(accessToken);
   if (response.status === 401) {
     try {

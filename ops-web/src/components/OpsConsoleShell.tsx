@@ -12,6 +12,7 @@ import {
   Users,
   KeyRound,
   Truck,
+  Package,
   LogOut,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
@@ -26,6 +27,13 @@ export function OpsConsoleShell({ children }: { children: React.ReactNode }) {
   const [isSigningIn, setIsSigningIn] = useState(false);
 
   const navItems = [
+    {
+      label: "Delivery",
+      href: "/delivery",
+      icon: Package,
+      color: "text-cyan-400",
+      permission: Permission.DELIVERY_MANAGE,
+    },
     {
       label: role === "MOVER_PARTNER" ? "My Moving Agency" : "Movers",
       href: "/movers",
